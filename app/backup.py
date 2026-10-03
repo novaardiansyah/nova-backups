@@ -1,8 +1,94 @@
 from datetime import datetime
+import logging
 import os
 from pathlib import Path
+import pty
+import re
 import shutil
 import subprocess
+import sys
+
+
+def log_milestone(logger, message: str, is_tty: bool):
+    if is_tty:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                record = logger.makeRecord(
+                    logger.name,
+                    logging.INFO,
+                    "",
+                    0,
+                    message,
+                    (),
+                    None,
+                )
+                handler.handle(record)
+    else:
+        logger.info(message)
+
+
+def execute_rar(command: list[str], destination: Path, logger):
+    master_fd, slave_fd = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=str(destination),
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+        )
+    except Exception:
+        os.close(slave_fd)
+        os.close(master_fd)
+        raise
+
+    os.close(slave_fd)
+    try:
+        output_chunks = []
+        last_percent = -1
+        last_milestone = 0
+        stream_buffer = ""
+        is_tty = sys.stdout.isatty()
+
+        while True:
+            try:
+                chunk = os.read(master_fd, 1024)
+                if not chunk:
+                    break
+                text = chunk.decode("utf-8", errors="ignore")
+                output_chunks.append(text)
+                stream_buffer += text
+
+                matches = re.findall(r"(\d{1,3})%", stream_buffer)
+                if matches:
+                    val = int(matches[-1])
+                    if 0 <= val <= 100 and val != last_percent:
+                        last_percent = val
+                        if is_tty:
+                            sys.stdout.write(f"\rCompressing snapshot: {val}%")
+                            sys.stdout.flush()
+
+                        milestone = (val // 20) * 20
+                        if milestone > last_milestone and milestone <= 100:
+                            last_milestone = milestone
+                            log_milestone(logger, f"Compressing snapshot: {milestone}%", is_tty)
+
+                stream_buffer = stream_buffer[-32:]
+            except OSError:
+                break
+
+        if is_tty and last_percent != -1:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+        if last_milestone > 0 and last_milestone < 100:
+            log_milestone(logger, "Compressing snapshot: 100%", is_tty)
+
+        proc.wait()
+        full_output = "".join(output_chunks)
+        return proc.returncode, full_output
+    finally:
+        os.close(master_fd)
 
 
 def validate_source(source_path: Path):
@@ -86,28 +172,21 @@ def run_backup(config, logger):
             "a",
             "-r",
             "-ol",
-            "-idq",
+            "-idc",
+            "-idd",
+            "-idn",
             "-y",
             f"-hp{rar_password}",
             f"{timestamp}.rar",
             timestamp,
         ]
 
-        rar_result = subprocess.run(
-            rar_command,
-            cwd=str(destination),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
+        returncode, rar_output = execute_rar(rar_command, destination, logger)
 
-        if rar_result.stdout.strip():
-            logger.info(rar_result.stdout.rstrip())
-
-        if rar_result.returncode not in (0, 1):
+        if returncode not in (0, 1):
+            error_details = rar_output.strip()
             raise RuntimeError(
-                f"rar compression failed with exit code {rar_result.returncode}"
+                f"rar compression failed with exit code {returncode}: {error_details}"
             )
 
         if not rar_file.exists() or rar_file.stat().st_size == 0:
