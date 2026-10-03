@@ -156,7 +156,9 @@ def run_backup(config, logger):
     try:
         for item in sources:
             source_path = Path(item["source"])
-            target_rel = str(item["target"]).lstrip("/")
+            target_val = str(item.get("target", "")).strip()
+            target_str = str(item["source"]) if target_val == "-" else str(item["target"])
+            target_rel = target_str.lstrip("/")
 
             validate_source(source_path)
 
