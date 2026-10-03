@@ -23,7 +23,7 @@ def run_backup(config, logger):
     sources = backup_config["sources"]
     excludes = config.get("exclude", [])
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    timestamp = datetime.now().strftime("backup-%Y%m%d-%H%M%S")
     snapshot_dir = destination / timestamp
     rar_file = destination / f"{timestamp}.rar"
 
@@ -85,6 +85,8 @@ def run_backup(config, logger):
             "rar",
             "a",
             "-r",
+            "-ol",
+            "-idq",
             "-y",
             f"-hp{rar_password}",
             f"{timestamp}.rar",
@@ -103,10 +105,13 @@ def run_backup(config, logger):
         if rar_result.stdout.strip():
             logger.info(rar_result.stdout.rstrip())
 
-        if rar_result.returncode != 0:
+        if rar_result.returncode not in (0, 1):
             raise RuntimeError(
                 f"rar compression failed with exit code {rar_result.returncode}"
             )
+
+        if not rar_file.exists() or rar_file.stat().st_size == 0:
+            raise RuntimeError("rar archive was not created or is empty")
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
