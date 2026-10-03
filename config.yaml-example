@@ -1,5 +1,7 @@
 schedule:
-  time: "23:59"
+  time:
+    - "10:00"
+    - "15:00"
 
 backup:
   destination: "/backup"
