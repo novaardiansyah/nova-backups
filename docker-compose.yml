@@ -12,6 +12,6 @@ services:
     volumes:
       - /home:/host/home:ro
       - /root:/host/root:ro
-      - /home/nova-zorin/novaardiansyah/Backups:/backup
+      - ${BACKUP_DESTINATION}:/backup
       - ./config.yaml:/app/config.yaml:ro
       - ./logs:/app/logs

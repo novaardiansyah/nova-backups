@@ -1,6 +1,6 @@
 import sys
 
-from .backup import run_backup
+from .backup import clean_backups, prune_backups, run_backup
 from .config import load_config
 from .logger import setup_logger
 from .scheduler import start_scheduler
@@ -24,6 +24,20 @@ def main():
             sys.exit(1)
         return
 
+    if mode == "clean":
+        try:
+            clean_backups(config, logger)
+        except Exception:
+            sys.exit(1)
+        return
+
+    if mode == "prune":
+        try:
+            prune_backups(config, logger)
+        except Exception:
+            sys.exit(1)
+        return
+
     if mode == "schedule":
         try:
             start_scheduler(
@@ -39,6 +53,8 @@ def main():
     print("Usage:")
     print("  python -m app.main schedule")
     print("  python -m app.main backup")
+    print("  python -m app.main clean")
+    print("  python -m app.main prune")
     sys.exit(1)
 
 

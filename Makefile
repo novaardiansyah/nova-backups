@@ -7,4 +7,9 @@ docker-logs:
 
 docker-backup:
 	docker compose exec backup python -m app.main backup
-	
+
+docker-clean-backup:
+	docker compose exec backup python -m app.main clean
+
+docker-prune-backup:
+	docker compose exec backup python -m app.main prune

@@ -4,11 +4,11 @@ schedule:
 backup:
   destination: "/backup"
   sources:
-    - name: "Projects"
-      path: "/host/home/novaardiansyah/Projects"
+    - source: "/host/home/novaardiansyah/Projects"
+      target: "Projects"
 
-    - name: "Documents"
-      path: "/host/home/novaardiansyah/Documents"
+    - source: "/host/home/novaardiansyah/Documents"
+      target: "Documents"
 
   retention: 7
 

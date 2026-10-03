@@ -21,7 +21,7 @@ def load_config():
         raise ValueError("At least one backup.sources is required")
 
     for source in backup["sources"]:
-        if not source.get("name") or not source.get("path"):
-            raise ValueError("Each source must have 'name' and 'path'")
+        if not source.get("source") or not source.get("target"):
+            raise ValueError("Each source must have 'source' and 'target'")
 
     return config
