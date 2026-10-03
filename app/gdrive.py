@@ -319,3 +319,119 @@ def prune_cloud_backups(config: dict, logger):
     )
     logger.info("========================================")
 
+
+def find_cloud_backup(filename: str) -> dict | None:
+    if not is_gdrive_enabled():
+        return None
+
+    access_token = get_access_token()
+    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+    folder_id = get_or_create_folder(folder_path, access_token)
+
+    safe_name = filename.replace("'", r"\'")
+    query = (
+        f"name = '{safe_name}' and '{folder_id}' in parents and "
+        f"mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    params = {
+        "q": query,
+        "spaces": "drive",
+        "fields": "files(id, name, size)",
+    }
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    resp = requests.get(
+        "https://www.googleapis.com/drive/v3/files",
+        headers=headers,
+        params=params,
+        timeout=30,
+    )
+
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to find cloud backup: {resp.status_code} {resp.text}"
+        )
+
+    files = resp.json().get("files", [])
+    if files:
+        return files[0]
+    return None
+
+
+def get_cloud_backup_names() -> list[str]:
+    if not is_gdrive_enabled():
+        return []
+
+    access_token = get_access_token()
+    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+    folder_id = get_or_create_folder(folder_path, access_token)
+    files = list_cloud_backups(folder_id, access_token)
+    return [f.get("name", "") for f in files if f.get("name")]
+
+
+def download_cloud_file(file_id: str, target_path: Path, expected_size: int, logger):
+    access_token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    resp = requests.get(
+        f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media",
+        headers=headers,
+        stream=True,
+        timeout=60,
+    )
+
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to download file from Google Drive: {resp.status_code} {resp.text}"
+        )
+
+    header_size = resp.headers.get("Content-Length")
+    total_size = int(header_size) if header_size else expected_size
+
+    downloaded = 0
+    last_percent = -1
+    last_milestone = 0
+    is_tty = sys.stdout.isatty()
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_target = target_path.with_suffix(".downloading")
+
+    try:
+        with open(temp_target, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    if total_size > 0:
+                        val = min(int(downloaded * 100 / total_size), 100)
+                        if val != last_percent:
+                            last_percent = val
+                            if is_tty:
+                                sys.stdout.write(f"\rDownloading from Google Drive: {val}%")
+                                sys.stdout.flush()
+
+                            milestone = (val // 20) * 20
+                            if milestone > last_milestone and milestone <= 100:
+                                last_milestone = milestone
+                                log_milestone(logger, f"Downloading from Google Drive: {milestone}%", is_tty)
+
+        if is_tty and last_percent != -1:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+        if last_milestone > 0 and last_milestone < 100:
+            log_milestone(logger, "Downloading from Google Drive: 100%", is_tty)
+
+        temp_target.rename(target_path)
+        logger.info("DOWNLOAD FROM GOOGLE DRIVE SUCCESS: %s", target_path.name)
+    except Exception:
+        temp_target.unlink(missing_ok=True)
+        raise
+
+

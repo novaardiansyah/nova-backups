@@ -17,5 +17,6 @@ services:
       - /home:/host/home:ro
       - /root:/host/root:ro
       - ${BACKUP_DESTINATION}:/backup
+      - ${RECOVERY_DESTINATION}:/recovery
       - ./config.yaml:/app/config.yaml:ro
       - ./logs:/app/logs

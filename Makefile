@@ -15,3 +15,6 @@ docker-backup-clean: docker-clean-backup
 
 docker-prune-backup:
 	docker compose exec backup python -m app.main prune
+
+docker-restore:
+	docker compose exec backup python -m app.main restore $(FILE)

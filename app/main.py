@@ -3,6 +3,7 @@ import sys
 from .backup import clean_backups, prune_backups, run_backup
 from .config import load_config
 from .logger import setup_logger
+from .restore import run_restore
 from .scheduler import start_scheduler
 
 
@@ -38,6 +39,14 @@ def main():
             sys.exit(1)
         return
 
+    if mode == "restore":
+        filename = sys.argv[2] if len(sys.argv) > 2 else None
+        try:
+            run_restore(config, logger, filename)
+        except Exception:
+            sys.exit(1)
+        return
+
     if mode == "schedule":
         try:
             start_scheduler(
@@ -55,8 +64,10 @@ def main():
     print("  python -m app.main backup")
     print("  python -m app.main clean")
     print("  python -m app.main prune")
+    print("  python -m app.main restore [filename]")
     sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
+
