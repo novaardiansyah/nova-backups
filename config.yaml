@@ -1,0 +1,27 @@
+schedule:
+  time: "02:00"
+
+backup:
+  destination: "/backup"
+  sources:
+    - name: "Projects"
+      path: "/host/home/nova-zorin/novaardiansyah/Projects"
+
+    - name: "Documents"
+      path: "/host/home/nova-zorin/Documents"
+
+    - name: "RootData"
+      path: "/host/root/some-folder"
+
+  retention: 0
+
+exclude:
+  - "**/node_modules/"
+  - "**/vendor/"
+  - "**/.git/"
+  - "**/.next/"
+  - "**/dist/"
+  - "**/build/"
+  - "**/target/"
+  - "**/__pycache__/"
+  - "**/*.pyc"

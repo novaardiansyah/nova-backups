@@ -1,0 +1,17 @@
+services:
+  backup:
+    build: .
+    container_name: nova-backups
+    restart: unless-stopped
+
+    environment:
+      TZ: Asia/Jakarta
+
+    user: "0:0"
+
+    volumes:
+      - /home:/host/home:ro
+      - /root:/host/root:ro
+      - /home/nova-zorin/novaardiansyah/Backups:/backup
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
