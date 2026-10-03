@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 
+from .backup import set_global_permissions
 from .gdrive import (
     download_cloud_file,
     find_cloud_backup,
@@ -109,40 +110,6 @@ def get_recovery_destination(config: dict) -> Path:
     return destination / "Recovery"
 
 
-def set_global_permissions(target: Path):
-    backup_path = Path("/backup")
-    target_uid = backup_path.stat().st_uid if backup_path.exists() else 0
-    target_gid = backup_path.stat().st_gid if backup_path.exists() else 0
-
-    if target_uid != 0:
-        subprocess.run(
-            ["chown", "-R", f"{target_uid}:{target_gid}", str(target)],
-            check=False,
-        )
-
-    subprocess.run(
-        ["chmod", "-R", "777", str(target)],
-        check=False,
-    )
-
-    try:
-        os.chmod(target, 0o777)
-        if target.is_dir():
-            for root, dirs, files in os.walk(target):
-                for d in dirs:
-                    try:
-                        os.chmod(os.path.join(root, d), 0o777)
-                    except OSError:
-                        pass
-                for f in files:
-                    try:
-                        os.chmod(os.path.join(root, f), 0o777)
-                    except OSError:
-                        pass
-    except Exception:
-        pass
-
-
 def prompt_for_backup_file(destination: Path, logger) -> str:
     local_files = [
         item.name for item in destination.iterdir()
@@ -236,6 +203,7 @@ def run_restore(config: dict, logger, filename: str | None = None):
             logger,
         )
         set_global_permissions(local_path)
+        set_global_permissions(destination)
         target_file = local_path
 
     recovery_dir = get_recovery_destination(config)
