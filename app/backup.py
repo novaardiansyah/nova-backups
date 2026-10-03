@@ -119,8 +119,8 @@ def validate_source(source_path: Path):
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
-    if not source_path.is_dir():
-        raise NotADirectoryError(f"Source is not a directory: {source_path}")
+    if not (source_path.is_dir() or source_path.is_file()):
+        raise ValueError(f"Source must be a file or directory: {source_path}")
 
 
 def run_backup(config, logger):
@@ -163,25 +163,44 @@ def run_backup(config, logger):
             validate_source(source_path)
 
             target_path = snapshot_dir / target_rel
-            target_path.parent.mkdir(parents=True, exist_ok=True)
 
-            command = [
-                "rsync",
-                "-a",
-                "--human-readable",
-                "--numeric-ids",
-                "--delete",
-            ]
+            if source_path.is_dir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                dest_path = target_path
+                command = [
+                    "rsync",
+                    "-a",
+                    "--human-readable",
+                    "--numeric-ids",
+                    "--delete",
+                ]
+                for pattern in excludes:
+                    command.append(f"--exclude={pattern}")
+                command.extend([
+                    f"{source_path}/",
+                    f"{dest_path}/",
+                ])
+            else:
+                if target_str.endswith("/") or target_path.is_dir():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    dest_path = target_path / source_path.name
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    dest_path = target_path
+                command = [
+                    "rsync",
+                    "-a",
+                    "--human-readable",
+                    "--numeric-ids",
+                ]
+                for pattern in excludes:
+                    command.append(f"--exclude={pattern}")
+                command.extend([
+                    str(source_path),
+                    str(dest_path),
+                ])
 
-            for pattern in excludes:
-                command.append(f"--exclude={pattern}")
-
-            command.extend([
-                f"{source_path}/",
-                f"{target_path}/",
-            ])
-
-            logger.info("Backing up: %s -> %s", source_path, target_path)
+            logger.info("Backing up: %s -> %s", source_path, dest_path)
 
             result = subprocess.run(
                 command,
