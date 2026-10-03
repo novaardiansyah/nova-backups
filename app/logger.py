@@ -28,3 +28,22 @@ def setup_logger():
     logger.addHandler(console_handler)
 
     return logger
+
+
+def log_milestone(logger, message: str, is_tty: bool):
+    if is_tty:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                record = logger.makeRecord(
+                    logger.name,
+                    logging.INFO,
+                    "",
+                    0,
+                    message,
+                    (),
+                    None,
+                )
+                handler.handle(record)
+    else:
+        logger.info(message)
+

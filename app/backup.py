@@ -1,5 +1,4 @@
 from datetime import datetime
-import logging
 import os
 from pathlib import Path
 import pty
@@ -8,23 +7,12 @@ import shutil
 import subprocess
 import sys
 
-
-def log_milestone(logger, message: str, is_tty: bool):
-    if is_tty:
-        for handler in logger.handlers:
-            if isinstance(handler, logging.FileHandler):
-                record = logger.makeRecord(
-                    logger.name,
-                    logging.INFO,
-                    "",
-                    0,
-                    message,
-                    (),
-                    None,
-                )
-                handler.handle(record)
-    else:
-        logger.info(message)
+from .gdrive import (
+    is_gdrive_enabled,
+    prune_cloud_backups,
+    upload_file_to_gdrive,
+)
+from .logger import log_milestone
 
 
 def execute_rar(command: list[str], destination: Path, logger):
@@ -195,7 +183,15 @@ def run_backup(config, logger):
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
         logger.info("FULL BACKUP SUCCESS: %s", rar_file)
-        prune_backups(config, logger)
+
+        if is_gdrive_enabled():
+            try:
+                upload_file_to_gdrive(rar_file, logger)
+                prune_cloud_backups(config, logger)
+            except Exception:
+                logger.exception("GOOGLE DRIVE UPLOAD/PRUNE FAILED")
+
+        prune_local_backups(config, logger)
 
     except Exception:
         logger.exception("FULL BACKUP FAILED")
@@ -227,11 +223,11 @@ def clean_backups(config, logger):
     snapshots = get_snapshots(destination)
 
     if not snapshots:
-        logger.info("No backups found to delete.")
+        logger.info("No local backups found to delete.")
         return
 
     logger.info("========================================")
-    logger.info("CLEAN ALL BACKUPS START")
+    logger.info("CLEAN ALL LOCAL BACKUPS START")
 
     for snapshot in snapshots:
         if snapshot.is_dir():
@@ -241,30 +237,35 @@ def clean_backups(config, logger):
         logger.info("Deleted snapshot: %s", snapshot)
 
     logger.info(
-        "CLEAN ALL BACKUPS SUCCESS: Deleted %d snapshot(s).",
+        "CLEAN ALL LOCAL BACKUPS SUCCESS: Deleted %d snapshot(s).",
         len(snapshots),
     )
     logger.info("========================================")
 
 
-def prune_backups(config, logger):
+def prune_local_backups(config, logger):
     backup_config = config["backup"]
     destination = Path(backup_config["destination"])
     snapshots = get_snapshots(destination)
 
     retention_val = backup_config.get("retention", config.get("retention", 0))
+    if isinstance(retention_val, dict):
+        local_val = retention_val.get("local", 0)
+    else:
+        local_val = retention_val
+
     try:
-        retention = int(retention_val)
+        retention = int(local_val)
     except (ValueError, TypeError):
         retention = 0
 
     if retention <= 0:
-        logger.info("Retention is set to %d. Skipping prune.", retention)
+        logger.info("Local retention is set to %d. Skipping local prune.", retention)
         return
 
     if len(snapshots) <= retention:
         logger.info(
-            "Total snapshots (%d) within retention limit (%d). No pruning needed.",
+            "Total local snapshots (%d) within retention limit (%d). No pruning needed.",
             len(snapshots),
             retention,
         )
@@ -273,7 +274,7 @@ def prune_backups(config, logger):
     to_delete = snapshots[:-retention]
 
     logger.info("========================================")
-    logger.info("PRUNE BACKUPS START (Retention: %d)", retention)
+    logger.info("PRUNE LOCAL BACKUPS START (Retention: %d)", retention)
 
     for snapshot in to_delete:
         if snapshot.is_dir():
@@ -283,8 +284,14 @@ def prune_backups(config, logger):
         logger.info("Pruned old snapshot: %s", snapshot)
 
     logger.info(
-        "PRUNE BACKUPS SUCCESS: Deleted %d old snapshot(s), %d retained.",
+        "PRUNE LOCAL BACKUPS SUCCESS: Deleted %d old snapshot(s), %d retained.",
         len(to_delete),
         retention,
     )
     logger.info("========================================")
+
+
+def prune_backups(config, logger):
+    prune_local_backups(config, logger)
+    if is_gdrive_enabled():
+        prune_cloud_backups(config, logger)

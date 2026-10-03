@@ -4,6 +4,9 @@ services:
     container_name: nova-backups
     restart: unless-stopped
 
+    env_file:
+      - .env
+
     environment:
       TZ: Asia/Jakarta
       RAR_PASSWORD: ${RAR_PASSWORD}

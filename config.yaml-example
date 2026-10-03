@@ -10,7 +10,9 @@ backup:
     - source: "/host/home/novaardiansyah/Documents"
       target: "Documents"
 
-  retention: 7
+  retention:
+    local: 3
+    cloud: 10
 
 exclude:
   - "**/node_modules/"
