@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from .gdrive import (
     is_gdrive_enabled,
@@ -13,6 +14,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone
+from .webhook import send_webhook_notification
 
 
 def execute_rar(command: list[str], destination: Path, logger):
@@ -122,8 +124,16 @@ def validate_source(source_path: Path):
 
 
 def run_backup(config, logger):
+    start_time = time.time()
     rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
     if not rar_password:
+        send_webhook_notification(
+            title="Backup Failed",
+            status="Failed",
+            details={"Error": "RAR_PASSWORD is not set in environment"},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
         raise ValueError("RAR_PASSWORD is not set in environment")
 
     backup_config = config["backup"]
@@ -231,12 +241,34 @@ def run_backup(config, logger):
 
         prune_local_backups(config, logger)
 
-    except Exception:
+        rar_size_mb = rar_file.stat().st_size / (1024 * 1024) if rar_file.exists() else 0
+        details = {
+            "Snapshot": rar_file.name,
+            "Size": f"{rar_size_mb:.2f} MB",
+            "Google Drive": "Uploaded" if is_gdrive_enabled() else "Disabled",
+        }
+        send_webhook_notification(
+            title="Backup Finished",
+            status="Success",
+            details=details,
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+
+    except Exception as err:
         logger.exception("FULL BACKUP FAILED")
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if rar_file.exists():
             rar_file.unlink(missing_ok=True)
+
+        send_webhook_notification(
+            title="Backup Failed",
+            status="Failed",
+            details={"Error": str(err)},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
         raise
 
     finally:
@@ -258,29 +290,56 @@ def get_snapshots(destination: Path):
 
 
 def clean_backups(config, logger):
+    start_time = time.time()
     backup_config = config["backup"]
     destination = Path(backup_config["destination"])
     snapshots = get_snapshots(destination)
 
     if not snapshots:
         logger.info("No local backups found to delete.")
+        send_webhook_notification(
+            title="Backup Clean Finished",
+            status="Success",
+            details={"Result": "No local backups found to delete"},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
         return
 
     logger.info("========================================")
     logger.info("CLEAN ALL LOCAL BACKUPS START")
 
-    for snapshot in snapshots:
-        if snapshot.is_dir():
-            shutil.rmtree(snapshot, ignore_errors=True)
-        else:
-            snapshot.unlink(missing_ok=True)
-        logger.info("Deleted snapshot: %s", snapshot)
+    try:
+        for snapshot in snapshots:
+            if snapshot.is_dir():
+                shutil.rmtree(snapshot, ignore_errors=True)
+            else:
+                snapshot.unlink(missing_ok=True)
+            logger.info("Deleted snapshot: %s", snapshot)
 
-    logger.info(
-        "CLEAN ALL LOCAL BACKUPS SUCCESS: Deleted %d snapshot(s).",
-        len(snapshots),
-    )
-    logger.info("========================================")
+        logger.info(
+            "CLEAN ALL LOCAL BACKUPS SUCCESS: Deleted %d snapshot(s).",
+            len(snapshots),
+        )
+        send_webhook_notification(
+            title="Backup Clean Finished",
+            status="Success",
+            details={"Deleted": f"{len(snapshots)} snapshot(s)"},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+    except Exception as err:
+        logger.exception("CLEAN ALL LOCAL BACKUPS FAILED")
+        send_webhook_notification(
+            title="Backup Clean Failed",
+            status="Failed",
+            details={"Error": str(err)},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+        raise
+    finally:
+        logger.info("========================================")
 
 
 def prune_local_backups(config, logger):
@@ -332,6 +391,24 @@ def prune_local_backups(config, logger):
 
 
 def prune_backups(config, logger):
-    prune_local_backups(config, logger)
-    if is_gdrive_enabled():
-        prune_cloud_backups(config, logger)
+    start_time = time.time()
+    try:
+        prune_local_backups(config, logger)
+        if is_gdrive_enabled():
+            prune_cloud_backups(config, logger)
+        send_webhook_notification(
+            title="Backup Prune Finished",
+            status="Success",
+            details={"Result": "Prune executed according to retention limits"},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+    except Exception as err:
+        send_webhook_notification(
+            title="Backup Prune Failed",
+            status="Failed",
+            details={"Error": str(err)},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+        raise
