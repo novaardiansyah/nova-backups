@@ -15,6 +15,14 @@ from .gdrive import (
 from .logger import log_milestone
 
 
+class RestoreError(Exception):
+    pass
+
+
+class IncorrectPasswordError(RestoreError):
+    pass
+
+
 def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, logger):
     recovery_dir.mkdir(parents=True, exist_ok=True)
     target_path = str(recovery_dir).rstrip("/") + "/"
@@ -91,7 +99,20 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
         full_output = "".join(output_chunks)
         if proc.returncode not in (0, 1):
             error_details = full_output.strip()
-            raise RuntimeError(
+            lower_err = error_details.lower()
+            if proc.returncode == 11 or "incorrect password" in lower_err or "wrong password" in lower_err:
+                raise IncorrectPasswordError(
+                    f"Incorrect password for '{rar_file.name}'. Please check RAR_PASSWORD in your .env file."
+                )
+            if proc.returncode == 3 or "crc error" in lower_err or "checksum error" in lower_err:
+                raise RestoreError(
+                    f"Archive '{rar_file.name}' is damaged or corrupted (CRC error)."
+                )
+            if proc.returncode == 5 or "write error" in lower_err:
+                raise RestoreError(
+                    f"Disk write error while extracting '{rar_file.name}'. Please check disk space and permissions."
+                )
+            raise RestoreError(
                 f"rar extraction failed with exit code {proc.returncode}: {error_details}"
             )
         return proc.returncode, full_output
@@ -166,7 +187,8 @@ def prompt_for_backup_file(destination: Path, logger) -> str:
 def run_restore(config: dict, logger, filename: str | None = None):
     rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
     if not rar_password:
-        raise ValueError("RAR_PASSWORD is not set in environment")
+        logger.error("RESTORE FAILED: RAR_PASSWORD is not set in environment.")
+        raise RestoreError("RAR_PASSWORD is not set in environment")
 
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
@@ -175,8 +197,8 @@ def run_restore(config: dict, logger, filename: str | None = None):
         filename = prompt_for_backup_file(destination, logger)
 
     if not filename:
-        logger.error("No backup filename provided. Aborting restore.")
-        raise ValueError("No backup filename provided")
+        logger.error("RESTORE FAILED: No backup filename provided. Aborting restore.")
+        raise RestoreError("No backup filename provided")
 
     filename = filename.strip()
     if not filename.endswith(".rar"):
@@ -185,44 +207,47 @@ def run_restore(config: dict, logger, filename: str | None = None):
     logger.info("========================================")
     logger.info("RESTORE INITIATED: %s", filename)
 
-    local_path = destination / filename
-
-    if local_path.exists() and local_path.stat().st_size > 0:
-        logger.info("Backup found locally: %s", local_path)
-        target_file = local_path
-    else:
-        logger.info("Backup '%s' not found locally. Checking Google Drive...", filename)
-        if not is_gdrive_enabled():
-            raise FileNotFoundError(
-                f"Backup file '{filename}' not found locally and Google Drive is not configured"
-            )
-
-        cloud_info = find_cloud_backup(filename)
-        if not cloud_info:
-            raise FileNotFoundError(
-                f"Backup file '{filename}' was not found locally or in Google Drive"
-            )
-
-        logger.info("Found on Google Drive: %s. Downloading to %s...", filename, local_path)
-        download_cloud_file(
-            cloud_info["id"],
-            local_path,
-            int(cloud_info.get("size", 0)),
-            logger,
-        )
-        set_global_permissions(local_path)
-        set_global_permissions(destination)
-        target_file = local_path
-
-    recovery_dir = get_recovery_destination(config)
-    recovery_dir.mkdir(parents=True, exist_ok=True)
-    set_global_permissions(recovery_dir)
-
-    logger.info("Extracting %s to %s", target_file, recovery_dir)
     try:
+        local_path = destination / filename
+
+        if local_path.exists() and local_path.stat().st_size > 0:
+            logger.info("Backup found locally: %s", local_path)
+            target_file = local_path
+        else:
+            logger.info("Backup '%s' not found locally. Checking Google Drive...", filename)
+            if not is_gdrive_enabled():
+                raise RestoreError(
+                    f"Backup file '{filename}' not found locally and Google Drive is not configured."
+                )
+
+            cloud_info = find_cloud_backup(filename)
+            if not cloud_info:
+                raise RestoreError(
+                    f"Backup file '{filename}' was not found locally or in Google Drive."
+                )
+
+            logger.info("Found on Google Drive: %s. Downloading to %s...", filename, local_path)
+            download_cloud_file(
+                cloud_info["id"],
+                local_path,
+                int(cloud_info.get("size", 0)),
+                logger,
+            )
+            set_global_permissions(local_path)
+            set_global_permissions(destination)
+            target_file = local_path
+
+        recovery_dir = get_recovery_destination(config)
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        set_global_permissions(recovery_dir)
+
+        logger.info("Extracting %s to %s", target_file, recovery_dir)
         execute_rar_extract(target_file, recovery_dir, rar_password, logger)
         set_global_permissions(recovery_dir)
         logger.info("RESTORE SUCCESS: Extracted to %s", recovery_dir)
+    except RestoreError as err:
+        logger.error("RESTORE FAILED: %s", err)
+        raise
     except Exception:
         logger.exception("RESTORE FAILED")
         raise
