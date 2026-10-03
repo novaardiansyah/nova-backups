@@ -249,7 +249,9 @@ def get_snapshots(destination: Path):
 
     snapshots = [
         item for item in destination.iterdir()
-        if item.is_dir() or (item.is_file() and item.name.endswith(".rar"))
+        if item.name.startswith("backup-") and (
+            item.is_dir() or item.name.endswith(".rar")
+        )
     ]
     snapshots.sort(key=lambda p: p.name)
     return snapshots

@@ -16,6 +16,8 @@ from .logger import log_milestone
 
 
 def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, logger):
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    target_path = str(recovery_dir).rstrip("/") + "/"
     command = [
         "rar",
         "x",
@@ -26,7 +28,7 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
         "-idn",
         f"-hp{rar_password}",
         str(rar_file),
-        f"{str(recovery_dir)}/",
+        target_path,
     ]
 
     master_fd, slave_fd = pty.openpty()
@@ -98,16 +100,22 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
 
 
 def get_recovery_destination(config: dict) -> Path:
-    if Path("/recovery").exists():
-        return Path("/recovery")
-
-    env_dest = os.environ.get("RECOVERY_DESTINATION")
-    if env_dest and Path(env_dest).exists():
-        return Path(env_dest)
-
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
-    return destination / "Recovery"
+
+    recovery_mount = Path("/recovery")
+    try:
+        recovery_mount.mkdir(parents=True, exist_ok=True)
+        probe_file = recovery_mount / ".probe"
+        probe_file.touch()
+        probe_file.unlink()
+        return recovery_mount
+    except OSError:
+        pass
+
+    recovery_local = destination / "Recovery"
+    recovery_local.mkdir(parents=True, exist_ok=True)
+    return recovery_local
 
 
 def prompt_for_backup_file(destination: Path, logger) -> str:
