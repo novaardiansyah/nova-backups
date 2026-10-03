@@ -23,6 +23,7 @@ Thumbs.db
 
 # Local configuration
 config.local.yaml
+config.yml
 
 # Backup data
 Backups/
