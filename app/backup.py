@@ -79,6 +79,40 @@ def execute_rar(command: list[str], destination: Path, logger):
         os.close(master_fd)
 
 
+def set_global_permissions(target: Path):
+    backup_path = Path("/backup")
+    target_uid = backup_path.stat().st_uid if backup_path.exists() else 0
+    target_gid = backup_path.stat().st_gid if backup_path.exists() else 0
+
+    if target_uid != 0:
+        subprocess.run(
+            ["chown", "-R", f"{target_uid}:{target_gid}", str(target)],
+            check=False,
+        )
+
+    subprocess.run(
+        ["chmod", "-R", "777", str(target)],
+        check=False,
+    )
+
+    try:
+        os.chmod(target, 0o777)
+        if target.is_dir():
+            for root, dirs, files in os.walk(target):
+                for d in dirs:
+                    try:
+                        os.chmod(os.path.join(root, d), 0o777)
+                    except OSError:
+                        pass
+                for f in files:
+                    try:
+                        os.chmod(os.path.join(root, f), 0o777)
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
 def validate_source(source_path: Path):
     if not source_path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
@@ -102,6 +136,7 @@ def run_backup(config, logger):
     rar_file = destination / f"{timestamp}.rar"
 
     destination.mkdir(parents=True, exist_ok=True)
+    set_global_permissions(destination)
     snapshot_dir.mkdir(parents=True, exist_ok=False)
 
     logger.info("========================================")
@@ -179,6 +214,9 @@ def run_backup(config, logger):
 
         if not rar_file.exists() or rar_file.stat().st_size == 0:
             raise RuntimeError("rar archive was not created or is empty")
+
+        set_global_permissions(rar_file)
+        set_global_permissions(destination)
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 

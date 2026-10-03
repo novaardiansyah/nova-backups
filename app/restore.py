@@ -109,6 +109,40 @@ def get_recovery_destination(config: dict) -> Path:
     return destination / "Recovery"
 
 
+def set_global_permissions(target: Path):
+    backup_path = Path("/backup")
+    target_uid = backup_path.stat().st_uid if backup_path.exists() else 0
+    target_gid = backup_path.stat().st_gid if backup_path.exists() else 0
+
+    if target_uid != 0:
+        subprocess.run(
+            ["chown", "-R", f"{target_uid}:{target_gid}", str(target)],
+            check=False,
+        )
+
+    subprocess.run(
+        ["chmod", "-R", "777", str(target)],
+        check=False,
+    )
+
+    try:
+        os.chmod(target, 0o777)
+        if target.is_dir():
+            for root, dirs, files in os.walk(target):
+                for d in dirs:
+                    try:
+                        os.chmod(os.path.join(root, d), 0o777)
+                    except OSError:
+                        pass
+                for f in files:
+                    try:
+                        os.chmod(os.path.join(root, f), 0o777)
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
 def prompt_for_backup_file(destination: Path, logger) -> str:
     local_files = [
         item.name for item in destination.iterdir()
@@ -201,14 +235,17 @@ def run_restore(config: dict, logger, filename: str | None = None):
             int(cloud_info.get("size", 0)),
             logger,
         )
+        set_global_permissions(local_path)
         target_file = local_path
 
     recovery_dir = get_recovery_destination(config)
     recovery_dir.mkdir(parents=True, exist_ok=True)
+    set_global_permissions(recovery_dir)
 
     logger.info("Extracting %s to %s", target_file, recovery_dir)
     try:
         execute_rar_extract(target_file, recovery_dir, rar_password, logger)
+        set_global_permissions(recovery_dir)
         logger.info("RESTORE SUCCESS: Extracted to %s", recovery_dir)
     except Exception:
         logger.exception("RESTORE FAILED")
