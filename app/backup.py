@@ -14,7 +14,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone
-from .webhook import send_webhook_notification
+from .webhook import format_size, send_webhook_notification
 
 
 def execute_rar(command: list[str], destination: Path, logger):
@@ -241,10 +241,10 @@ def run_backup(config, logger):
 
         prune_local_backups(config, logger)
 
-        rar_size_mb = rar_file.stat().st_size / (1024 * 1024) if rar_file.exists() else 0
+        rar_size = rar_file.stat().st_size if rar_file.exists() else 0
         details = {
             "Snapshot": rar_file.name,
-            "Size": f"{rar_size_mb:.2f} MB",
+            "Size": format_size(rar_size),
             "Google Drive": "Uploaded" if is_gdrive_enabled() else "Disabled",
         }
         send_webhook_notification(
@@ -273,6 +273,17 @@ def run_backup(config, logger):
 
     finally:
         logger.info("========================================")
+
+
+def get_snapshot_size(path: Path) -> int:
+    try:
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except OSError:
+        return 0
 
 
 def get_snapshots(destination: Path):
@@ -310,6 +321,7 @@ def clean_backups(config, logger):
     logger.info("CLEAN ALL LOCAL BACKUPS START")
 
     try:
+        total_freed_bytes = sum(get_snapshot_size(s) for s in snapshots)
         for snapshot in snapshots:
             if snapshot.is_dir():
                 shutil.rmtree(snapshot, ignore_errors=True)
@@ -324,7 +336,10 @@ def clean_backups(config, logger):
         send_webhook_notification(
             title="Backup Clean Finished",
             status="Success",
-            details={"Deleted": f"{len(snapshots)} snapshot(s)"},
+            details={
+                "Deleted": f"{len(snapshots)} snapshot(s)",
+                "Total Freed": format_size(total_freed_bytes),
+            },
             duration_seconds=time.time() - start_time,
             logger=logger,
         )
@@ -342,7 +357,7 @@ def clean_backups(config, logger):
         logger.info("========================================")
 
 
-def prune_local_backups(config, logger):
+def prune_local_backups(config, logger) -> tuple[int, int]:
     backup_config = config["backup"]
     destination = Path(backup_config["destination"])
     snapshots = get_snapshots(destination)
@@ -360,7 +375,7 @@ def prune_local_backups(config, logger):
 
     if retention <= 0:
         logger.info("Local retention is set to %d. Skipping local prune.", retention)
-        return
+        return 0, 0
 
     if len(snapshots) <= retention:
         logger.info(
@@ -368,9 +383,10 @@ def prune_local_backups(config, logger):
             len(snapshots),
             retention,
         )
-        return
+        return 0, 0
 
     to_delete = snapshots[:-retention]
+    freed_bytes = sum(get_snapshot_size(s) for s in to_delete)
 
     logger.info("========================================")
     logger.info("PRUNE LOCAL BACKUPS START (Retention: %d)", retention)
@@ -388,18 +404,35 @@ def prune_local_backups(config, logger):
         retention,
     )
     logger.info("========================================")
+    return len(to_delete), freed_bytes
 
 
 def prune_backups(config, logger):
     start_time = time.time()
     try:
-        prune_local_backups(config, logger)
+        local_count, local_freed = prune_local_backups(config, logger)
+        cloud_count, cloud_freed = (0, 0)
         if is_gdrive_enabled():
-            prune_cloud_backups(config, logger)
+            cloud_count, cloud_freed = prune_cloud_backups(config, logger)
+
+        total_count = local_count + cloud_count
+        total_freed = local_freed + cloud_freed
+
+        if total_count == 0:
+            details = {"Result": "All snapshots are within retention limits"}
+        else:
+            details = {
+                "Total Pruned": f"{total_count} snapshot(s)",
+                "Total Freed": format_size(total_freed),
+            }
+            if is_gdrive_enabled():
+                details["Local Pruned"] = f"{local_count} snapshot(s) ({format_size(local_freed)})"
+                details["Cloud Pruned"] = f"{cloud_count} snapshot(s) ({format_size(cloud_freed)})"
+
         send_webhook_notification(
             title="Backup Prune Finished",
             status="Success",
-            details={"Result": "Prune executed according to retention limits"},
+            details=details,
             duration_seconds=time.time() - start_time,
             logger=logger,
         )
