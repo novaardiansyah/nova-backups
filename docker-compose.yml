@@ -6,6 +6,7 @@ services:
 
     environment:
       TZ: Asia/Jakarta
+      RAR_PASSWORD: ${RAR_PASSWORD}
 
     user: "0:0"
 

@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,6 +14,10 @@ def validate_source(source_path: Path):
 
 
 def run_backup(config, logger):
+    rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
+    if not rar_password:
+        raise ValueError("RAR_PASSWORD is not set in environment")
+
     backup_config = config["backup"]
     destination = Path(backup_config["destination"])
     sources = backup_config["sources"]
@@ -20,6 +25,7 @@ def run_backup(config, logger):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     snapshot_dir = destination / timestamp
+    rar_file = destination / f"{timestamp}.rar"
 
     destination.mkdir(parents=True, exist_ok=True)
     snapshot_dir.mkdir(parents=True, exist_ok=False)
@@ -73,13 +79,46 @@ def run_backup(config, logger):
                     f"{result.returncode}"
                 )
 
-        logger.info("FULL BACKUP SUCCESS: %s", snapshot_dir)
+        logger.info("Compressing snapshot to encrypted RAR: %s", rar_file)
+
+        rar_command = [
+            "rar",
+            "a",
+            "-r",
+            "-y",
+            f"-hp{rar_password}",
+            f"{timestamp}.rar",
+            timestamp,
+        ]
+
+        rar_result = subprocess.run(
+            rar_command,
+            cwd=str(destination),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+
+        if rar_result.stdout.strip():
+            logger.info(rar_result.stdout.rstrip())
+
+        if rar_result.returncode != 0:
+            raise RuntimeError(
+                f"rar compression failed with exit code {rar_result.returncode}"
+            )
+
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
+
+        logger.info("FULL BACKUP SUCCESS: %s", rar_file)
         prune_backups(config, logger)
 
     except Exception:
         logger.exception("FULL BACKUP FAILED")
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
+        if rar_file.exists():
+            rar_file.unlink(missing_ok=True)
         raise
 
     finally:
@@ -92,7 +131,7 @@ def get_snapshots(destination: Path):
 
     snapshots = [
         item for item in destination.iterdir()
-        if item.is_dir()
+        if item.is_dir() or (item.is_file() and item.name.endswith(".rar"))
     ]
     snapshots.sort(key=lambda p: p.name)
     return snapshots
@@ -111,7 +150,10 @@ def clean_backups(config, logger):
     logger.info("CLEAN ALL BACKUPS START")
 
     for snapshot in snapshots:
-        shutil.rmtree(snapshot, ignore_errors=True)
+        if snapshot.is_dir():
+            shutil.rmtree(snapshot, ignore_errors=True)
+        else:
+            snapshot.unlink(missing_ok=True)
         logger.info("Deleted snapshot: %s", snapshot)
 
     logger.info(
@@ -150,7 +192,10 @@ def prune_backups(config, logger):
     logger.info("PRUNE BACKUPS START (Retention: %d)", retention)
 
     for snapshot in to_delete:
-        shutil.rmtree(snapshot, ignore_errors=True)
+        if snapshot.is_dir():
+            shutil.rmtree(snapshot, ignore_errors=True)
+        else:
+            snapshot.unlink(missing_ok=True)
         logger.info("Pruned old snapshot: %s", snapshot)
 
     logger.info(
