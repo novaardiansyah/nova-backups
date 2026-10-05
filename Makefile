@@ -1,3 +1,11 @@
+ifeq ($(filter $(firstword $(MAKECMDGOALS)),docker-sync docker-sync-backup docker-restore),$(firstword $(MAKECMDGOALS)))
+  CMD_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  ifneq ($(CMD_ARGS),)
+    FILE ?= $(CMD_ARGS)
+    $(eval $(CMD_ARGS):;@:)
+  endif
+endif
+
 docker-build:
 	docker compose down
 	docker compose up -d --build
@@ -21,3 +29,4 @@ docker-restore:
 
 docker-sync:
 	docker compose exec backup python -m app.main sync $(FILE)
+	
