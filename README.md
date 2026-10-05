@@ -51,6 +51,7 @@ Backup Finished
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
 - **Dual Retention Management**: Independent retention thresholds for local disk and cloud storage to keep disk space lean while preserving archival history.
 - **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
+- **Bi-directional Snapshot Sync**: Synchronize snapshot archives between local disk and Google Drive by filename. Downloads the archive if missing locally, or uploads it if missing in the cloud.
 - **HMAC-SHA256 Webhook Reporting**: Deliver verified execution reports, durations, and status updates directly to Telegram notification channels.
 - **Resilient Error Handling**: Clean, user-friendly error diagnostics for password errors, archive corruption, and missing environments without noisy tracebacks.
 
@@ -146,6 +147,9 @@ make docker-restore
 
 # Restore specific backup file
 make docker-restore FILE=backup-20261003-222538.rar
+
+# Sync specific backup file between local and Google Drive
+make docker-sync FILE=backup-20261003-222538.rar
 
 # Clean all local snapshots
 make docker-clean-backup

@@ -5,6 +5,7 @@ from .config import load_config
 from .logger import setup_logger
 from .restore import run_restore
 from .scheduler import start_scheduler
+from .sync import run_sync
 
 
 def main():
@@ -47,6 +48,14 @@ def main():
             sys.exit(1)
         return
 
+    if mode == "sync":
+        filename = sys.argv[2] if len(sys.argv) > 2 else None
+        try:
+            run_sync(config, logger, filename)
+        except Exception:
+            sys.exit(1)
+        return
+
     if mode == "schedule":
         try:
             start_scheduler(
@@ -65,6 +74,7 @@ def main():
     print("  python -m app.main clean")
     print("  python -m app.main prune")
     print("  python -m app.main restore [filename]")
+    print("  python -m app.main sync [filename]")
     sys.exit(1)
 
 

@@ -18,3 +18,6 @@ docker-prune-backup:
 
 docker-restore:
 	docker compose exec backup python -m app.main restore $(FILE)
+
+docker-sync:
+	docker compose exec backup python -m app.main sync $(FILE)
