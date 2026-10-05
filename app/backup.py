@@ -36,7 +36,6 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
     try:
         output_chunks = []
         last_percent = -1
-        last_milestone = 0
         stream_buffer = ""
         is_tty = sys.stdout.isatty()
         start_time = time.time()
@@ -80,10 +79,7 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
                             sys.stdout.write(f"\rCompressing snapshot: {val}%{speed_display}\033[K")
                             sys.stdout.flush()
 
-                        milestone = (val // 20) * 20
-                        if milestone > last_milestone and milestone <= 100:
-                            last_milestone = milestone
-                            log_milestone(logger, f"Compressing snapshot: {milestone}%{speed_display}", is_tty)
+                        log_milestone(logger, f"Compressing snapshot: {val}%{speed_display}", is_tty)
 
                 stream_buffer = stream_buffer[-32:]
             except OSError:
@@ -97,7 +93,7 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
         avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
         final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
 
-        if last_milestone > 0 and last_milestone < 100:
+        if last_percent != -1 and last_percent < 100:
             log_milestone(logger, f"Compressing snapshot: 100%{final_speed_str}", is_tty)
 
         proc.wait()

@@ -156,7 +156,6 @@ def upload_file_to_gdrive(file_path: Path, logger):
     chunk_size = 5 * 1024 * 1024
     uploaded = 0
     last_percent = -1
-    last_milestone = 0
     is_tty = sys.stdout.isatty()
     start_time = time.time()
     last_speed_str = "0 B/s"
@@ -205,10 +204,7 @@ def upload_file_to_gdrive(file_path: Path, logger):
 
             if val != last_percent:
                 last_percent = val
-                milestone = (val // 20) * 20
-                if milestone > last_milestone and milestone <= 100:
-                    last_milestone = milestone
-                    log_milestone(logger, f"Uploading to Google Drive: {milestone}% ({last_speed_str})", is_tty)
+                log_milestone(logger, f"Uploading to Google Drive: {val}% ({last_speed_str})", is_tty)
 
     if is_tty and last_percent != -1:
         sys.stdout.write("\n")
@@ -218,7 +214,7 @@ def upload_file_to_gdrive(file_path: Path, logger):
     avg_speed = file_size / total_duration if total_duration > 0 else 0
     final_speed_str = format_speed(avg_speed)
 
-    if last_milestone > 0 and last_milestone < 100:
+    if last_percent != -1 and last_percent < 100:
         log_milestone(logger, f"Uploading to Google Drive: 100% ({final_speed_str})", is_tty)
 
     logger.info("UPLOAD TO GOOGLE DRIVE SUCCESS: %s", file_name)
@@ -409,7 +405,6 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
 
     downloaded = 0
     last_percent = -1
-    last_milestone = 0
     is_tty = sys.stdout.isatty()
     start_time = time.time()
     last_sample_time = start_time
@@ -442,10 +437,7 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
 
                         if val != last_percent:
                             last_percent = val
-                            milestone = (val // 20) * 20
-                            if milestone > last_milestone and milestone <= 100:
-                                last_milestone = milestone
-                                log_milestone(logger, f"Downloading from Google Drive: {milestone}% ({last_speed_str})", is_tty)
+                            log_milestone(logger, f"Downloading from Google Drive: {val}% ({last_speed_str})", is_tty)
 
         if is_tty and last_percent != -1:
             sys.stdout.write("\n")
@@ -455,7 +447,7 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
         avg_speed = total_size / total_duration if total_duration > 0 and total_size > 0 else 0
         final_speed_str = format_speed(avg_speed)
 
-        if last_milestone > 0 and last_milestone < 100:
+        if last_percent != -1 and last_percent < 100:
             log_milestone(logger, f"Downloading from Google Drive: 100% ({final_speed_str})", is_tty)
 
         temp_target.rename(target_path)
