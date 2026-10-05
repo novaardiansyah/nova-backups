@@ -37,6 +37,12 @@ def format_size(size_bytes: int | float) -> str:
     return f"{formatted} {units[unit_index]}"
 
 
+def format_speed(bytes_per_sec: float) -> str:
+    if bytes_per_sec <= 0:
+        return "0 B/s"
+    return f"{format_size(bytes_per_sec)}/s"
+
+
 def send_webhook_notification(
     title: str,
     status: str,

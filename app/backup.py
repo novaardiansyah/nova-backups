@@ -14,10 +14,10 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone
-from .webhook import format_size, send_webhook_notification
+from .webhook import format_size, format_speed, send_webhook_notification
 
 
-def execute_rar(command: list[str], destination: Path, logger):
+def execute_rar(command: list[str], destination: Path, logger, total_bytes: int = 0):
     master_fd, slave_fd = pty.openpty()
     try:
         proc = subprocess.Popen(
@@ -39,6 +39,10 @@ def execute_rar(command: list[str], destination: Path, logger):
         last_milestone = 0
         stream_buffer = ""
         is_tty = sys.stdout.isatty()
+        start_time = time.time()
+        last_sample_time = start_time
+        last_sample_bytes = 0.0
+        last_speed_str = "0 B/s"
 
         while True:
             try:
@@ -54,14 +58,32 @@ def execute_rar(command: list[str], destination: Path, logger):
                     val = int(matches[-1])
                     if 0 <= val <= 100 and val != last_percent:
                         last_percent = val
+
+                        if total_bytes > 0:
+                            current_processed = total_bytes * (val / 100.0)
+                            now = time.time()
+                            delta_time = now - last_sample_time
+                            if delta_time >= 0.5:
+                                speed = (current_processed - last_sample_bytes) / delta_time
+                                last_speed_str = format_speed(speed)
+                                last_sample_time = now
+                                last_sample_bytes = current_processed
+                            elif last_speed_str == "0 B/s":
+                                elapsed = now - start_time
+                                if elapsed > 0:
+                                    last_speed_str = format_speed(current_processed / elapsed)
+                            speed_display = f" ({last_speed_str})"
+                        else:
+                            speed_display = ""
+
                         if is_tty:
-                            sys.stdout.write(f"\rCompressing snapshot: {val}%")
+                            sys.stdout.write(f"\rCompressing snapshot: {val}%{speed_display}\033[K")
                             sys.stdout.flush()
 
                         milestone = (val // 20) * 20
                         if milestone > last_milestone and milestone <= 100:
                             last_milestone = milestone
-                            log_milestone(logger, f"Compressing snapshot: {milestone}%", is_tty)
+                            log_milestone(logger, f"Compressing snapshot: {milestone}%{speed_display}", is_tty)
 
                 stream_buffer = stream_buffer[-32:]
             except OSError:
@@ -71,8 +93,12 @@ def execute_rar(command: list[str], destination: Path, logger):
             sys.stdout.write("\n")
             sys.stdout.flush()
 
+        total_duration = time.time() - start_time
+        avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
+        final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
+
         if last_milestone > 0 and last_milestone < 100:
-            log_milestone(logger, "Compressing snapshot: 100%", is_tty)
+            log_milestone(logger, f"Compressing snapshot: 100%{final_speed_str}", is_tty)
 
         proc.wait()
         full_output = "".join(output_chunks)
@@ -221,6 +247,8 @@ def run_backup(config, logger):
 
         logger.info("Compressing snapshot to encrypted RAR: %s", rar_file)
 
+        snapshot_size = get_snapshot_size(snapshot_dir)
+
         rar_command = [
             "rar",
             "a",
@@ -235,7 +263,7 @@ def run_backup(config, logger):
             timestamp,
         ]
 
-        returncode, rar_output = execute_rar(rar_command, destination, logger)
+        returncode, rar_output = execute_rar(rar_command, destination, logger, snapshot_size)
 
         if returncode not in (0, 1):
             error_details = rar_output.strip()

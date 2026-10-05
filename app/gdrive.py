@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
 import sys
+import time
 import requests
 
 from .logger import log_milestone
+from .webhook import format_speed
 
 
 def is_gdrive_enabled() -> bool:
@@ -156,6 +158,8 @@ def upload_file_to_gdrive(file_path: Path, logger):
     last_percent = -1
     last_milestone = 0
     is_tty = sys.stdout.isatty()
+    start_time = time.time()
+    last_speed_str = "0 B/s"
 
     with open(file_path, "rb") as f:
         while uploaded < file_size:
@@ -170,12 +174,16 @@ def upload_file_to_gdrive(file_path: Path, logger):
                 "Content-Length": str(chunk_len),
             }
 
+            chunk_start = time.time()
             resp = requests.put(
                 upload_url,
                 data=chunk,
                 headers=chunk_headers,
                 timeout=60,
             )
+            chunk_duration = time.time() - chunk_start
+            if chunk_duration > 0:
+                last_speed_str = format_speed(chunk_len / chunk_duration)
 
             if end < file_size - 1:
                 if resp.status_code != 308:
@@ -191,23 +199,27 @@ def upload_file_to_gdrive(file_path: Path, logger):
             uploaded += chunk_len
             val = min(int(uploaded * 100 / file_size), 100)
 
+            if is_tty:
+                sys.stdout.write(f"\rUploading to Google Drive: {val}% ({last_speed_str})\033[K")
+                sys.stdout.flush()
+
             if val != last_percent:
                 last_percent = val
-                if is_tty:
-                    sys.stdout.write(f"\rUploading to Google Drive: {val}%")
-                    sys.stdout.flush()
-
                 milestone = (val // 20) * 20
                 if milestone > last_milestone and milestone <= 100:
                     last_milestone = milestone
-                    log_milestone(logger, f"Uploading to Google Drive: {milestone}%", is_tty)
+                    log_milestone(logger, f"Uploading to Google Drive: {milestone}% ({last_speed_str})", is_tty)
 
     if is_tty and last_percent != -1:
         sys.stdout.write("\n")
         sys.stdout.flush()
 
+    total_duration = time.time() - start_time
+    avg_speed = file_size / total_duration if total_duration > 0 else 0
+    final_speed_str = format_speed(avg_speed)
+
     if last_milestone > 0 and last_milestone < 100:
-        log_milestone(logger, "Uploading to Google Drive: 100%", is_tty)
+        log_milestone(logger, f"Uploading to Google Drive: 100% ({final_speed_str})", is_tty)
 
     logger.info("UPLOAD TO GOOGLE DRIVE SUCCESS: %s", file_name)
 
@@ -399,6 +411,10 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
     last_percent = -1
     last_milestone = 0
     is_tty = sys.stdout.isatty()
+    start_time = time.time()
+    last_sample_time = start_time
+    last_sample_bytes = 0
+    last_speed_str = "0 B/s"
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     temp_target = target_path.with_suffix(".downloading")
@@ -410,25 +426,37 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
                     f.write(chunk)
                     downloaded += len(chunk)
 
+                    now = time.time()
+                    delta_time = now - last_sample_time
+                    if delta_time >= 0.5:
+                        speed = (downloaded - last_sample_bytes) / delta_time
+                        last_speed_str = format_speed(speed)
+                        last_sample_time = now
+                        last_sample_bytes = downloaded
+
                     if total_size > 0:
                         val = min(int(downloaded * 100 / total_size), 100)
+                        if is_tty:
+                            sys.stdout.write(f"\rDownloading from Google Drive: {val}% ({last_speed_str})\033[K")
+                            sys.stdout.flush()
+
                         if val != last_percent:
                             last_percent = val
-                            if is_tty:
-                                sys.stdout.write(f"\rDownloading from Google Drive: {val}%")
-                                sys.stdout.flush()
-
                             milestone = (val // 20) * 20
                             if milestone > last_milestone and milestone <= 100:
                                 last_milestone = milestone
-                                log_milestone(logger, f"Downloading from Google Drive: {milestone}%", is_tty)
+                                log_milestone(logger, f"Downloading from Google Drive: {milestone}% ({last_speed_str})", is_tty)
 
         if is_tty and last_percent != -1:
             sys.stdout.write("\n")
             sys.stdout.flush()
 
+        total_duration = time.time() - start_time
+        avg_speed = total_size / total_duration if total_duration > 0 and total_size > 0 else 0
+        final_speed_str = format_speed(avg_speed)
+
         if last_milestone > 0 and last_milestone < 100:
-            log_milestone(logger, "Downloading from Google Drive: 100%", is_tty)
+            log_milestone(logger, f"Downloading from Google Drive: 100% ({final_speed_str})", is_tty)
 
         temp_target.rename(target_path)
         logger.info("DOWNLOAD FROM GOOGLE DRIVE SUCCESS: %s", target_path.name)

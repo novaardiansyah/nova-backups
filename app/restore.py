@@ -14,7 +14,7 @@ from .gdrive import (
     is_gdrive_enabled,
 )
 from .logger import log_milestone
-from .webhook import send_webhook_notification
+from .webhook import format_speed, send_webhook_notification
 
 
 class RestoreError(Exception):
@@ -62,6 +62,11 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
         last_milestone = 0
         stream_buffer = ""
         is_tty = sys.stdout.isatty()
+        start_time = time.time()
+        last_sample_time = start_time
+        last_sample_bytes = 0.0
+        last_speed_str = "0 B/s"
+        total_bytes = rar_file.stat().st_size if rar_file.exists() else 0
 
         while True:
             try:
@@ -77,14 +82,32 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
                     val = int(matches[-1])
                     if 0 <= val <= 100 and val != last_percent:
                         last_percent = val
+
+                        if total_bytes > 0:
+                            current_processed = total_bytes * (val / 100.0)
+                            now = time.time()
+                            delta_time = now - last_sample_time
+                            if delta_time >= 0.5:
+                                speed = (current_processed - last_sample_bytes) / delta_time
+                                last_speed_str = format_speed(speed)
+                                last_sample_time = now
+                                last_sample_bytes = current_processed
+                            elif last_speed_str == "0 B/s":
+                                elapsed = now - start_time
+                                if elapsed > 0:
+                                    last_speed_str = format_speed(current_processed / elapsed)
+                            speed_display = f" ({last_speed_str})"
+                        else:
+                            speed_display = ""
+
                         if is_tty:
-                            sys.stdout.write(f"\rExtracting snapshot: {val}%")
+                            sys.stdout.write(f"\rExtracting snapshot: {val}%{speed_display}\033[K")
                             sys.stdout.flush()
 
                         milestone = (val // 20) * 20
                         if milestone > last_milestone and milestone <= 100:
                             last_milestone = milestone
-                            log_milestone(logger, f"Extracting snapshot: {milestone}%", is_tty)
+                            log_milestone(logger, f"Extracting snapshot: {milestone}%{speed_display}", is_tty)
 
                 stream_buffer = stream_buffer[-32:]
             except OSError:
@@ -94,8 +117,12 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
             sys.stdout.write("\n")
             sys.stdout.flush()
 
+        total_duration = time.time() - start_time
+        avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
+        final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
+
         if last_milestone > 0 and last_milestone < 100:
-            log_milestone(logger, "Extracting snapshot: 100%", is_tty)
+            log_milestone(logger, f"Extracting snapshot: 100%{final_speed_str}", is_tty)
 
         proc.wait()
         full_output = "".join(output_chunks)
