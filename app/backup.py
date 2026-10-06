@@ -15,7 +15,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone, set_global_permissions, setup_logger
-from .utils import BackupLock, calculate_checksum, format_speed
+from .utils import BackupLock, calculate_checksum, cleanup_empty_directories, format_speed
 
 
 def get_snapshot_size(path: Path) -> int:
@@ -497,9 +497,18 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
                 upload_file_to_gdrive(rar_file, logger, folder_path=cloud_folder)
                 if not keep_local:
                     rar_file.unlink(missing_ok=True)
-                    logger.info("Removed local archive per keep_local_backup=False")
+                    if snapshot_dir.exists():
+                        shutil.rmtree(snapshot_dir, ignore_errors=True)
+                    cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
+                    logger.info("Removed local archive and directories per keep_local_backup=False")
             except Exception:
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
+        elif not keep_local:
+            rar_file.unlink(missing_ok=True)
+            if snapshot_dir.exists():
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
+            cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
+            logger.info("Removed local archive and directories per keep_local_backup=False")
 
         end_time = time.time()
         completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -537,6 +546,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if rar_file.exists():
             rar_file.unlink(missing_ok=True)
+        cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
 
         end_time = time.time()
         completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")

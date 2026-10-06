@@ -75,3 +75,27 @@ class BackupLock:
             except Exception:
                 pass
             self._fd = None
+
+
+def cleanup_empty_directories(target_dir: Path, stop_at: Path | None = None):
+    if stop_at is None:
+        stop_at = Path("/backup")
+    try:
+        stop_resolved = stop_at.resolve()
+        current = target_dir.resolve()
+        while current and current != stop_resolved:
+            try:
+                if not current.is_relative_to(stop_resolved):
+                    break
+            except AttributeError:
+                pass
+            if current.exists() and current.is_dir():
+                if not any(current.iterdir()):
+                    current.rmdir()
+                else:
+                    break
+            else:
+                break
+            current = current.parent
+    except Exception:
+        pass
