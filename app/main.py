@@ -1,5 +1,6 @@
 import sys
 
+from .api import run_schedules
 from .backup import clean_backups, prune_backups, run_backup
 from .config import load_config
 from .logger import setup_logger
@@ -10,14 +11,20 @@ from .sync import run_sync
 
 def main():
     logger = setup_logger()
+    mode = sys.argv[1] if len(sys.argv) > 1 else "schedule"
+
+    if mode in ("schedules", "list", "fetch-schedules"):
+        try:
+            run_schedules(logger)
+        except Exception:
+            sys.exit(1)
+        return
 
     try:
         config = load_config()
     except Exception:
         logger.exception("Failed to read config.yaml")
         sys.exit(1)
-
-    mode = sys.argv[1] if len(sys.argv) > 1 else "schedule"
 
     if mode == "backup":
         try:
@@ -70,6 +77,7 @@ def main():
 
     print("Usage:")
     print("  python -m app.main schedule")
+    print("  python -m app.main schedules")
     print("  python -m app.main backup")
     print("  python -m app.main clean")
     print("  python -m app.main prune")
@@ -80,4 +88,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

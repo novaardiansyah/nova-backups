@@ -5,3 +5,7 @@ __pycache__
 logs/*
 Api
 obsidian
+.env
+.env_temp
+.env.*
+

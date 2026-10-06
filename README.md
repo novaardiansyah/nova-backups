@@ -93,6 +93,12 @@ RAR_PASSWORD="your_secure_encryption_password"
 WEBHOOK_URL="https://your-webhook-domain.com/webhook/notifications/telegram"
 WEBHOOK_SECRET="your_hmac_secret_key"
 DEVICE_NAME="Nova-Zorin"
+
+# API Service
+API_URL="https://your-domain.com/api/system-backup"
+API_EMAIL="system-backup@example.com"
+API_PASSWORD="your_api_password"
+SERVER_SLUG="your_server_slug"
 ```
 
 ### Backup Configuration (`config.yaml`)
@@ -139,6 +145,9 @@ make docker-build
 
 # Follow live container logs
 make docker-logs
+
+# Fetch backup schedules from API
+make docker-schedules
 
 # Trigger manual backup immediately
 make docker-backup

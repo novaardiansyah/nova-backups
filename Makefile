@@ -29,3 +29,6 @@ docker-restore:
 
 docker-sync:
 	docker compose exec backup python -m app.main sync $(FILE)
+
+docker-schedules:
+	docker compose exec backup python -m app.main schedules
