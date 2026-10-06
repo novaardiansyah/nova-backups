@@ -16,9 +16,9 @@ services:
     user: "0:0"
 
     volumes:
-      - /home:/host/home:ro
-      - /root:/host/root:ro
-      - /www:/host/www:ro
+      - /home:/host/home
+      - /root:/host/root
+      - /www:/host/www
       - ${BACKUP_DESTINATION}:/backup
       - ${RECOVERY_DESTINATION}:/recovery
       - ./logs:/app/logs
