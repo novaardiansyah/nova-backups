@@ -20,3 +20,17 @@ services:
       - ${RECOVERY_DESTINATION}:/recovery
       - ./logs:/app/logs
 
+    networks:
+      - mysql_network
+      - sqlserver_network
+
+networks:
+  mysql_network:
+    external: true
+    name: mysql_network
+
+  sqlserver_network:
+    external: true
+    name: sqlserver_network
+
+
