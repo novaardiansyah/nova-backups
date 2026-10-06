@@ -69,7 +69,6 @@ git clone https://github.com/novaardiansyah/nova-backups.git
 cd nova-backups
 
 # Setup configuration
-cp config.yaml-example config.yaml
 cp .env-example .env
 ```
 
@@ -99,40 +98,6 @@ API_URL="https://your-domain.com/api/system-backup"
 API_EMAIL="system-backup@example.com"
 API_PASSWORD="your_api_password"
 SERVER_SLUG="your_server_slug"
-```
-
-### Backup Configuration (`config.yaml`)
-
-Define schedules, sources, retention rules, and exclusions in `config.yaml`:
-
-```yaml
-schedule:
-  time:
-    - "10:00"
-    - "15:00"
-
-backup:
-  destination: "/backup"
-  sources:
-    - source: "/host/home/user/Projects"
-      target: "/Projects"
-    - source: "/host/home/user/Documents"
-      target: "/Documents"
-
-  retention:
-    local: 3
-    cloud: 120
-
-exclude:
-  - "**/node_modules/"
-  - "**/vendor/"
-  - "**/.git/"
-  - "**/.next/"
-  - "**/dist/"
-  - "**/build/"
-  - "**/__pycache__/"
-  - "**/*.pyc"
-  - "**/*.log/"
 ```
 
 ### Running with Docker & Makefile
