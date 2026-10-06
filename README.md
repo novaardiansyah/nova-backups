@@ -70,11 +70,12 @@ cd nova-backups
 
 # Setup configuration
 cp config.yaml-example config.yaml
+cp .env-example .env
 ```
 
 ### Environment Configuration
 
-Create `.env` file in the root directory:
+Copy `.env-example` to `.env` and configure your credentials:
 
 ```env
 # Google Drive Credentials (OAuth2)

@@ -20,6 +20,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!.env-example
 
 # Local configuration
 config.local.yaml
