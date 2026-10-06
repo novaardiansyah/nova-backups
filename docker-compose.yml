@@ -3,7 +3,9 @@ services:
     build: .
     container_name: nova-backups
     restart: unless-stopped
-
+    cpus: ${CPU_LIMIT}
+    mem_limit: ${MEM_LIMIT}
+    
     env_file:
       - .env
 
