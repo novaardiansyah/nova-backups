@@ -3,50 +3,6 @@ import logging
 import os
 from pathlib import Path
 import re
-import subprocess
-
-
-def set_global_permissions(target: Path):
-    target_uid = 0
-    target_gid = 0
-
-    log_dir = Path("/app/logs")
-    backup_path = Path("/backup")
-
-    if log_dir.exists() and log_dir.stat().st_uid != 0:
-        target_uid = log_dir.stat().st_uid
-        target_gid = log_dir.stat().st_gid
-    elif backup_path.exists() and backup_path.stat().st_uid != 0:
-        target_uid = backup_path.stat().st_uid
-        target_gid = backup_path.stat().st_gid
-
-    if target_uid != 0:
-        subprocess.run(
-            ["chown", "-R", f"{target_uid}:{target_gid}", str(target)],
-            check=False,
-        )
-
-    subprocess.run(
-        ["chmod", "-R", "777", str(target)],
-        check=False,
-    )
-
-    try:
-        os.chmod(target, 0o777)
-        if target.is_dir():
-            for root, dirs, files in os.walk(target):
-                for d in dirs:
-                    try:
-                        os.chmod(os.path.join(root, d), 0o777)
-                    except OSError:
-                        pass
-                for f in files:
-                    try:
-                        os.chmod(os.path.join(root, f), 0o777)
-                    except OSError:
-                        pass
-    except Exception:
-        pass
 
 
 class DailyRotatingFileHandler(logging.FileHandler):
@@ -61,7 +17,6 @@ class DailyRotatingFileHandler(logging.FileHandler):
         self.max_files = max_files
         self.max_bytes = max_bytes
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        set_global_permissions(self.log_dir)
 
         old_backup_log = self.log_dir / "backup.log"
         if old_backup_log.exists():
@@ -88,16 +43,7 @@ class DailyRotatingFileHandler(logging.FileHandler):
         self.current_index = self._get_active_index_for_date(self.current_date)
         log_path = self._get_log_path(self.current_date, self.current_index)
         super().__init__(str(log_path.resolve()), encoding=encoding)
-        set_global_permissions(self.log_dir)
         self.prune_old_logs()
-
-    def _open(self):
-        stream = super()._open()
-        try:
-            set_global_permissions(Path(self.baseFilename))
-        except Exception:
-            pass
-        return stream
 
     def _get_log_path(self, date_str: str, index: int) -> Path:
         return self.log_dir / f"backup-{date_str}-{index}.log"
@@ -157,7 +103,6 @@ class DailyRotatingFileHandler(logging.FileHandler):
             log_path = self._get_log_path(self.current_date, self.current_index)
         self.baseFilename = str(log_path.resolve())
         self.stream = self._open()
-        set_global_permissions(self.log_dir)
         self.prune_old_logs()
 
     def prune_old_logs(self):
@@ -194,7 +139,6 @@ class DailyRotatingFileHandler(logging.FileHandler):
                 self.current_index = self._get_active_index_for_date(today)
                 self.baseFilename = str(self._get_log_path(self.current_date, self.current_index).resolve())
                 self.stream = self._open()
-                set_global_permissions(self.log_dir)
                 self.prune_old_logs()
             elif self.should_rollover(record):
                 self.do_rollover()
@@ -211,7 +155,6 @@ def get_log_dir() -> Path:
         except OSError:
             log_dir = Path("./logs")
             log_dir.mkdir(parents=True, exist_ok=True)
-    set_global_permissions(log_dir)
     return log_dir
 
 

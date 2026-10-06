@@ -14,7 +14,7 @@ from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
-from .logger import log_milestone, set_global_permissions, setup_logger
+from .logger import log_milestone, setup_logger
 from .utils import BackupLock, calculate_checksum, cleanup_empty_directories, format_speed
 
 
@@ -219,7 +219,6 @@ def dump_mysql_database(database_name: str, target_file: Path, logger):
         target_file.unlink(missing_ok=True)
         raise RuntimeError(f"mysqldump produced an empty file for '{database_name}'")
 
-    set_global_permissions(target_file)
     logger.info("MySQL database dump completed: %s", target_file)
 
 
@@ -331,7 +330,6 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
         created_bak.unlink(missing_ok=True)
     except OSError:
         pass
-    set_global_permissions(target_file)
     logger.info("SQL Server database backup completed: %s", target_file)
 
 
@@ -365,7 +363,6 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
 
     destination_dir = resolve_destination_path(raw_local_dest)
     destination_dir.mkdir(parents=True, exist_ok=True)
-    set_global_permissions(destination_dir)
 
     snapshot_dir = destination_dir / stem
     rar_file = destination_dir / rar_filename
@@ -482,8 +479,6 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         if not rar_file.exists() or rar_file.stat().st_size == 0:
             raise RuntimeError("rar archive was not created or is empty")
 
-        set_global_permissions(rar_file)
-        set_global_permissions(destination_dir)
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
         logger.info("BACKUP ARCHIVE CREATED: %s", rar_file)

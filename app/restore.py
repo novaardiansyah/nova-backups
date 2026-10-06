@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 
-from .backup import set_global_permissions
 from .gdrive import (
     download_cloud_file,
     find_cloud_backup,
@@ -151,22 +150,13 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
 
 
 def get_recovery_destination(config: dict) -> Path:
+    recovery_mount = Path("/recovery")
+    if recovery_mount.exists():
+        return recovery_mount
+
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
-
-    recovery_mount = Path("/recovery")
-    try:
-        recovery_mount.mkdir(parents=True, exist_ok=True)
-        probe_file = recovery_mount / ".probe"
-        probe_file.touch()
-        probe_file.unlink()
-        return recovery_mount
-    except OSError:
-        pass
-
-    recovery_local = destination / "Recovery"
-    recovery_local.mkdir(parents=True, exist_ok=True)
-    return recovery_local
+    return destination / "Recovery"
 
 
 def prompt_for_backup_file(destination: Path, logger) -> str:
@@ -263,17 +253,13 @@ def run_restore(config: dict, logger, filename: str | None = None):
                 int(cloud_info.get("size", 0)),
                 logger,
             )
-            set_global_permissions(local_path)
-            set_global_permissions(destination)
             target_file = local_path
 
         recovery_dir = get_recovery_destination(config)
         recovery_dir.mkdir(parents=True, exist_ok=True)
-        set_global_permissions(recovery_dir)
 
         logger.info("Extracting %s to %s", target_file, recovery_dir)
         execute_rar_extract(target_file, recovery_dir, rar_password, logger)
-        set_global_permissions(recovery_dir)
         logger.info("RESTORE SUCCESS: Extracted to %s", recovery_dir)
 
     except RestoreError as err:
