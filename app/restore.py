@@ -59,6 +59,7 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
     try:
         output_chunks = []
         last_percent = -1
+        last_milestone = 0
         stream_buffer = ""
         is_tty = sys.stdout.isatty()
         start_time = time.time()
@@ -103,7 +104,10 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
                             sys.stdout.write(f"\rExtracting snapshot: {val}%{speed_display}\033[K")
                             sys.stdout.flush()
 
-                        log_milestone(logger, f"Extracting snapshot: {val}%{speed_display}", is_tty)
+                        milestone = (val // 25) * 25
+                        if milestone > 0 and milestone > last_milestone:
+                            last_milestone = milestone
+                            log_milestone(logger, f"Extracting snapshot: {milestone}%{speed_display}", is_tty)
 
                 stream_buffer = stream_buffer[-32:]
             except OSError:
@@ -117,8 +121,9 @@ def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, l
         avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
         final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
 
-        if last_percent != -1 and last_percent < 100:
+        if last_percent != -1 and last_milestone < 100:
             log_milestone(logger, f"Extracting snapshot: 100%{final_speed_str}", is_tty)
+            last_milestone = 100
 
         proc.wait()
         full_output = "".join(output_chunks)

@@ -13,7 +13,7 @@ from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
-from .logger import log_milestone, setup_logger
+from .logger import log_milestone, set_global_permissions, setup_logger
 from .webhook import format_size, format_speed, send_webhook_notification
 
 
@@ -47,6 +47,7 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
     try:
         output_chunks = []
         last_percent = -1
+        last_milestone = 0
         stream_buffer = ""
         is_tty = sys.stdout.isatty()
         start_time = time.time()
@@ -90,7 +91,10 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
                             sys.stdout.write(f"\rCompressing snapshot: {val}%{speed_display}\033[K")
                             sys.stdout.flush()
 
-                        log_milestone(logger, f"Compressing snapshot: {val}%{speed_display}", is_tty)
+                        milestone = (val // 25) * 25
+                        if milestone > 0 and milestone > last_milestone:
+                            last_milestone = milestone
+                            log_milestone(logger, f"Compressing snapshot: {milestone}%{speed_display}", is_tty)
 
                 stream_buffer = stream_buffer[-32:]
             except OSError:
@@ -104,8 +108,9 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
         avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
         final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
 
-        if last_percent != -1 and last_percent < 100:
+        if last_percent != -1 and last_milestone < 100:
             log_milestone(logger, f"Compressing snapshot: 100%{final_speed_str}", is_tty)
+            last_milestone = 100
 
         proc.wait()
         full_output = "".join(output_chunks)
@@ -138,40 +143,6 @@ def resolve_destination_path(raw_path: str) -> Path:
             rel = raw_path.split("/Backups/", 1)[1]
             return Path("/backup") / rel
     return Path(raw_path)
-
-
-def set_global_permissions(target: Path):
-    backup_path = Path("/backup")
-    target_uid = backup_path.stat().st_uid if backup_path.exists() else 0
-    target_gid = backup_path.stat().st_gid if backup_path.exists() else 0
-
-    if target_uid != 0:
-        subprocess.run(
-            ["chown", "-R", f"{target_uid}:{target_gid}", str(target)],
-            check=False,
-        )
-
-    subprocess.run(
-        ["chmod", "-R", "777", str(target)],
-        check=False,
-    )
-
-    try:
-        os.chmod(target, 0o777)
-        if target.is_dir():
-            for root, dirs, files in os.walk(target):
-                for d in dirs:
-                    try:
-                        os.chmod(os.path.join(root, d), 0o777)
-                    except OSError:
-                        pass
-                for f in files:
-                    try:
-                        os.chmod(os.path.join(root, f), 0o777)
-                    except OSError:
-                        pass
-    except Exception:
-        pass
 
 
 def validate_source(source_path: Path):
