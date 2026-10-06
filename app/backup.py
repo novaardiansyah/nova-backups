@@ -223,12 +223,18 @@ def dump_mysql_database(database_name: str, target_file: Path, logger):
 
 
 def find_sqlserver_backup_file(bak_filename: str) -> Path | None:
-    candidates = [
-        Path("/host/home/nova-zorin/novaardiansyah/Projects/docker/sqlserver/backups") / bak_filename,
-        Path("/home/nova-zorin/novaardiansyah/Projects/docker/sqlserver/backups") / bak_filename,
-        Path("./Projects/docker/sqlserver/backups") / bak_filename,
+    custom_path = os.environ.get("MSSQL_BACKUP_PATH") or os.environ.get("MSSQL_BACKUP_DESTINATION")
+    candidates = []
+    if custom_path:
+        base_p = resolve_source_path(custom_path.strip())
+        candidates.append(base_p / bak_filename)
+        candidates.append(Path(custom_path) / bak_filename)
+
+    candidates.extend([
         Path("/var/opt/mssql/backup") / bak_filename,
-    ]
+        Path("./Projects/docker/sqlserver/backups") / bak_filename,
+    ])
+
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             return candidate
