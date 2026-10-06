@@ -1,7 +1,7 @@
 import sys
 
 from .api import run_schedules
-from .backup import clean_backups, prune_backups, run_backup
+from .backup import run_backup
 from .logger import setup_logger
 from .restore import run_restore
 from .scheduler import start_scheduler
@@ -22,20 +22,6 @@ def main():
     if mode == "backup":
         try:
             run_backup({}, logger)
-        except Exception:
-            sys.exit(1)
-        return
-
-    if mode == "clean":
-        try:
-            clean_backups({}, logger)
-        except Exception:
-            sys.exit(1)
-        return
-
-    if mode == "prune":
-        try:
-            prune_backups({}, logger)
         except Exception:
             sys.exit(1)
         return
@@ -72,8 +58,6 @@ def main():
     print("  python -m app.main schedule")
     print("  python -m app.main schedules")
     print("  python -m app.main backup")
-    print("  python -m app.main clean")
-    print("  python -m app.main prune")
     print("  python -m app.main restore [filename]")
     print("  python -m app.main sync [filename]")
     sys.exit(1)
@@ -81,5 +65,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

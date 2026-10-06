@@ -278,58 +278,6 @@ def delete_cloud_file(file_id: str, access_token: str):
         )
 
 
-def prune_cloud_backups(config: dict, logger) -> tuple[int, int]:
-    if not is_gdrive_enabled():
-        return 0, 0
-
-    backup_config = config.get("backup", {})
-    retention_val = backup_config.get("retention", config.get("retention", {}))
-    if isinstance(retention_val, dict):
-        cloud_val = retention_val.get("cloud", 0)
-    else:
-        cloud_val = retention_val
-
-    try:
-        cloud_retention = int(cloud_val)
-    except (ValueError, TypeError):
-        cloud_retention = 0
-
-    if cloud_retention <= 0:
-        logger.info("Cloud retention is set to %d. Skipping cloud prune.", cloud_retention)
-        return 0, 0
-
-    access_token = get_access_token()
-    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
-    folder_id = get_or_create_folder(folder_path, access_token)
-    files = list_cloud_backups(folder_id, access_token)
-
-    if len(files) <= cloud_retention:
-        logger.info(
-            "Total cloud snapshots (%d) within retention limit (%d). No cloud pruning needed.",
-            len(files),
-            cloud_retention,
-        )
-        return 0, 0
-
-    to_delete = files[:-cloud_retention]
-    freed_bytes = sum(int(item.get("size", 0)) for item in to_delete)
-
-    logger.info("========================================")
-    logger.info("PRUNE CLOUD BACKUPS START (Retention: %d)", cloud_retention)
-
-    for item in to_delete:
-        delete_cloud_file(item["id"], access_token)
-        logger.info("Pruned old cloud snapshot: %s", item.get("name"))
-
-    logger.info(
-        "PRUNE CLOUD BACKUPS SUCCESS: Deleted %d old snapshot(s), %d retained.",
-        len(to_delete),
-        cloud_retention,
-    )
-    logger.info("========================================")
-    return len(to_delete), freed_bytes
-
-
 def find_cloud_backup(filename: str) -> dict | None:
     if not is_gdrive_enabled():
         return None

@@ -16,13 +16,6 @@ docker-logs:
 docker-backup:
 	docker compose exec backup python -m app.main backup
 
-docker-clean-backup:
-	docker compose exec backup python -m app.main clean
-
-docker-backup-clean: docker-clean-backup
-
-docker-prune-backup:
-	docker compose exec backup python -m app.main prune
 
 docker-restore:
 	docker compose exec backup python -m app.main restore $(FILE)

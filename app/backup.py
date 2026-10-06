@@ -10,7 +10,6 @@ import time
 
 from .gdrive import (
     is_gdrive_enabled,
-    prune_cloud_backups,
     upload_file_to_gdrive,
 )
 from .logger import log_milestone
@@ -280,11 +279,8 @@ def run_backup(config, logger):
         if is_gdrive_enabled():
             try:
                 upload_file_to_gdrive(rar_file, logger)
-                prune_cloud_backups(config, logger)
             except Exception:
-                logger.exception("GOOGLE DRIVE UPLOAD/PRUNE FAILED")
-
-        prune_local_backups(config, logger)
+                logger.exception("GOOGLE DRIVE UPLOAD FAILED")
 
         rar_size = rar_file.stat().st_size if rar_file.exists() else 0
         details = {
@@ -319,174 +315,3 @@ def run_backup(config, logger):
     finally:
         logger.info("========================================")
 
-
-def get_snapshot_size(path: Path) -> int:
-    try:
-        if not path.exists():
-            return 0
-        if path.is_file():
-            return path.stat().st_size
-        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
-    except OSError:
-        return 0
-
-
-def get_snapshots(destination: Path):
-    if not destination.exists() or not destination.is_dir():
-        return []
-
-    snapshots = [
-        item for item in destination.iterdir()
-        if item.name.startswith("backup-") and (
-            item.is_dir() or item.name.endswith(".rar")
-        )
-    ]
-    snapshots.sort(key=lambda p: p.name)
-    return snapshots
-
-
-def clean_backups(config, logger):
-    start_time = time.time()
-    backup_config = config["backup"]
-    destination = Path(backup_config["destination"])
-    snapshots = get_snapshots(destination)
-
-    if not snapshots:
-        logger.info("No local backups found to delete.")
-        send_webhook_notification(
-            title="Backup Clean Finished",
-            status="Success",
-            details={"Result": "No local backups found to delete"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-        return
-
-    logger.info("========================================")
-    logger.info("CLEAN ALL LOCAL BACKUPS START")
-
-    try:
-        total_freed_bytes = sum(get_snapshot_size(s) for s in snapshots)
-        for snapshot in snapshots:
-            if snapshot.is_dir():
-                shutil.rmtree(snapshot, ignore_errors=True)
-            else:
-                snapshot.unlink(missing_ok=True)
-            logger.info("Deleted snapshot: %s", snapshot)
-
-        logger.info(
-            "CLEAN ALL LOCAL BACKUPS SUCCESS: Deleted %d snapshot(s).",
-            len(snapshots),
-        )
-        send_webhook_notification(
-            title="Backup Clean Finished",
-            status="Success",
-            details={
-                "Deleted": f"{len(snapshots)} snapshot(s)",
-                "Total Freed": format_size(total_freed_bytes),
-            },
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-    except Exception as err:
-        logger.exception("CLEAN ALL LOCAL BACKUPS FAILED")
-        send_webhook_notification(
-            title="Backup Clean Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-        raise
-    finally:
-        logger.info("========================================")
-
-
-def prune_local_backups(config, logger) -> tuple[int, int]:
-    backup_config = config["backup"]
-    destination = Path(backup_config["destination"])
-    snapshots = get_snapshots(destination)
-
-    retention_val = backup_config.get("retention", config.get("retention", 0))
-    if isinstance(retention_val, dict):
-        local_val = retention_val.get("local", 0)
-    else:
-        local_val = retention_val
-
-    try:
-        retention = int(local_val)
-    except (ValueError, TypeError):
-        retention = 0
-
-    if retention <= 0:
-        logger.info("Local retention is set to %d. Skipping local prune.", retention)
-        return 0, 0
-
-    if len(snapshots) <= retention:
-        logger.info(
-            "Total local snapshots (%d) within retention limit (%d). No pruning needed.",
-            len(snapshots),
-            retention,
-        )
-        return 0, 0
-
-    to_delete = snapshots[:-retention]
-    freed_bytes = sum(get_snapshot_size(s) for s in to_delete)
-
-    logger.info("========================================")
-    logger.info("PRUNE LOCAL BACKUPS START (Retention: %d)", retention)
-
-    for snapshot in to_delete:
-        if snapshot.is_dir():
-            shutil.rmtree(snapshot, ignore_errors=True)
-        else:
-            snapshot.unlink(missing_ok=True)
-        logger.info("Pruned old snapshot: %s", snapshot)
-
-    logger.info(
-        "PRUNE LOCAL BACKUPS SUCCESS: Deleted %d old snapshot(s), %d retained.",
-        len(to_delete),
-        retention,
-    )
-    logger.info("========================================")
-    return len(to_delete), freed_bytes
-
-
-def prune_backups(config, logger):
-    start_time = time.time()
-    try:
-        local_count, local_freed = prune_local_backups(config, logger)
-        cloud_count, cloud_freed = (0, 0)
-        if is_gdrive_enabled():
-            cloud_count, cloud_freed = prune_cloud_backups(config, logger)
-
-        total_count = local_count + cloud_count
-        total_freed = local_freed + cloud_freed
-
-        if total_count == 0:
-            details = {"Result": "All snapshots are within retention limits"}
-        else:
-            details = {
-                "Total Pruned": f"{total_count} snapshot(s)",
-                "Total Freed": format_size(total_freed),
-            }
-            if is_gdrive_enabled():
-                details["Local Pruned"] = f"{local_count} snapshot(s) ({format_size(local_freed)})"
-                details["Cloud Pruned"] = f"{cloud_count} snapshot(s) ({format_size(cloud_freed)})"
-
-        send_webhook_notification(
-            title="Backup Prune Finished",
-            status="Success",
-            details=details,
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-    except Exception as err:
-        send_webhook_notification(
-            title="Backup Prune Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-        raise
