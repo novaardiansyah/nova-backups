@@ -46,6 +46,10 @@ cp .env-example .env
 Copy `.env-example` to `.env` and configure your credentials:
 
 ```env
+# APP
+ENV="Local"
+BACKUP_INTERVAL="5m"
+
 # Google Drive Credentials (OAuth2)
 OAUTH_CLIENT_ID="your_google_client_id"
 OAUTH_CLIENT_SECRET="your_google_client_secret"
@@ -69,10 +73,10 @@ SERVER_SLUG="your_server_slug"
 The project includes pre-configured `Makefile` commands for common operations:
 
 ```bash
-# Build and start container in background
+# Build and start container with autonomous scheduler in background
 make docker-build
 
-# Follow live container logs
+# Follow live container logs and scheduler execution
 make docker-logs
 
 # Fetch backup schedules from API

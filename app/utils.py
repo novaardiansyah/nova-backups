@@ -38,3 +38,40 @@ def calculate_checksum(file_path: Path) -> str | None:
         return sha256.hexdigest()
     except OSError:
         return None
+
+
+class BackupLock:
+    def __init__(self, lock_file: Path = Path("/tmp/nova_backup.lock")):
+        self.lock_file = lock_file
+        self._fd = None
+
+    def acquire(self) -> bool:
+        import fcntl
+        import os
+
+        try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            self._fd = open(self.lock_file, "w")
+            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._fd.write(f"{os.getpid()}\n")
+            self._fd.flush()
+            return True
+        except (BlockingIOError, OSError):
+            if self._fd:
+                try:
+                    self._fd.close()
+                except Exception:
+                    pass
+                self._fd = None
+            return False
+
+    def release(self):
+        import fcntl
+
+        if self._fd:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                self._fd.close()
+            except Exception:
+                pass
+            self._fd = None

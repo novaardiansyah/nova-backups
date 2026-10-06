@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-CMD ["tail", "-f", "/dev/null"]
+CMD ["python", "-m", "app.main", "scheduler"]

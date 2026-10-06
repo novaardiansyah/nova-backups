@@ -15,7 +15,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone, set_global_permissions, setup_logger
-from .utils import calculate_checksum, format_speed
+from .utils import BackupLock, calculate_checksum, format_speed
 
 
 def get_snapshot_size(path: Path) -> int:
@@ -579,37 +579,45 @@ def run_backup(config=None, logger=None):
         else:
             logger = setup_logger()
 
-    rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
-    if not rar_password:
-        raise ValueError("RAR_PASSWORD is not set in environment")
-
-    schedules = fetch_backup_schedules(logger=logger)
-    if not schedules:
-        logger.info("No backup schedules retrieved from API.")
+    lock = BackupLock()
+    if not lock.acquire():
+        logger.warning("Previous backup process is still running. Skipping this backup execution.")
         return
 
-    enabled_schedules = [s for s in schedules if s.get("is_enabled", True)]
-    if not enabled_schedules:
-        logger.info("No enabled backup schedules to process.")
-        return
+    try:
+        rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
+        if not rar_password:
+            raise ValueError("RAR_PASSWORD is not set in environment")
 
-    logger.info("Found %d enabled schedule(s) to backup.", len(enabled_schedules))
+        schedules = fetch_backup_schedules(logger=logger)
+        if not schedules:
+            logger.info("No backup schedules retrieved from API.")
+            return
 
-    success_count = 0
-    fail_count = 0
+        enabled_schedules = [s for s in schedules if s.get("is_enabled", True)]
+        if not enabled_schedules:
+            logger.info("No enabled backup schedules to process.")
+            return
 
-    for schedule in enabled_schedules:
-        success = run_single_backup(schedule, rar_password, logger)
-        if success:
-            success_count += 1
-        else:
-            fail_count += 1
+        logger.info("Found %d enabled schedule(s) to backup.", len(enabled_schedules))
 
-    logger.info(
-        "ALL BACKUP TASKS FINISHED: %d succeeded, %d failed.",
-        success_count,
-        fail_count,
-    )
+        success_count = 0
+        fail_count = 0
 
-    if fail_count > 0 and success_count == 0:
-        raise RuntimeError(f"All {fail_count} backup task(s) failed.")
+        for schedule in enabled_schedules:
+            success = run_single_backup(schedule, rar_password, logger)
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+
+        logger.info(
+            "ALL BACKUP TASKS FINISHED: %d succeeded, %d failed.",
+            success_count,
+            fail_count,
+        )
+
+        if fail_count > 0 and success_count == 0:
+            raise RuntimeError(f"All {fail_count} backup task(s) failed.")
+    finally:
+        lock.release()

@@ -8,7 +8,8 @@ endif
 
 docker-build:
 	clear
-	docker compose down
+	docker compose kill || true
+	docker compose down --remove-orphans
 	docker compose up -d --build
 
 docker-logs:
@@ -30,4 +31,3 @@ docker-sync:
 docker-schedules:
 	clear
 	docker compose exec backup python -m app.main schedules
-	
