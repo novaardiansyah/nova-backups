@@ -244,23 +244,23 @@ def run_schedules(logger=None) -> list[dict]:
 
         for idx, item in enumerate(schedules, 1):
             name = item.get("name", "Unnamed")
+            backup_type = item.get("type", "files")
             source = item.get("source_path", "-")
             dest = item.get("local_destination_path", "-")
             cloud = item.get("cloud_destination_path", "-")
-            interval_val = item.get("interval_value", "-")
-            interval_unit = item.get("interval_unit", "")
-            interval = f"{interval_val} {interval_unit}".strip()
             next_run = item.get("next_backup_at", "-")
+            last_run = item.get("last_backup_at", "-")
             enabled = item.get("is_enabled", False)
             exclude = item.get("exclude", "-")
 
             logger.info(
-                "[%d] %s | Enabled: %s | Next: %s | Interval: %s | Source: %s | Destination: %s | Cloud: %s | Exclude: %s",
+                "[%d] %s (Type: %s) | Enabled: %s | Next: %s | Last: %s | Source: %s | Local: %s | Cloud: %s | Exclude: %s",
                 idx,
                 name,
+                backup_type,
                 enabled,
                 next_run,
-                interval,
+                last_run,
                 source,
                 dest,
                 cloud,
@@ -270,3 +270,4 @@ def run_schedules(logger=None) -> list[dict]:
     except Exception as err:
         logger.exception("Failed to fetch backup schedules: %s", err)
         raise
+
