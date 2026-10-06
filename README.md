@@ -2,7 +2,7 @@
 
 Hi Future Developer,
 
-Welcome to **Nova Backups Manager**! This project is a containerized, automated backup and disaster-recovery solution designed to perform multi-source directory syncing, generate password-encrypted RAR snapshot archives, sync backups to Google Drive cloud storage, manage local/cloud retention lifecycles, and broadcast real-time HMAC-verified execution reports to Telegram webhooks.
+Welcome to **Nova Backups Manager**! This project is a containerized, automated backup and disaster-recovery solution designed to perform multi-source directory syncing, generate password-encrypted RAR snapshot archives, sync backups to Google Drive cloud storage, and manage local/cloud retention lifecycles.
 
 > **Note:** This repository operates autonomously inside Docker, scheduling daily snapshots across multiple configured times, streaming compression and upload milestones, and providing an interactive restoration interface for rapid disaster recovery.
 
@@ -13,33 +13,7 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 - [RAR & UnRAR](https://www.rarlab.com/) - Password-protected encrypted snapshot compression (`-hp`)
 - [rsync](https://rsync.samba.org/) - Fast, incremental multi-source directory synchronization
 - [Google Drive API v3](https://developers.google.com/drive) - Resumable chunked cloud storage integration
-- [Requests](https://requests.readthedocs.io/) - HTTP library for API communication, Google Drive API, and HMAC webhook delivery
-
-## Telegram Webhook Notifications
-
-Upon completing any backup or restore operation, the manager automatically constructs and dispatches an execution summary:
-
-```text
-Backup Finished
-
-> Status: Success
-> Device: Nova-Zorin
-> Snapshot: backup-20261003-222538.rar
-> Size: 0.13 MB
-> Google Drive: Uploaded
-> End Time: 2026-10-03 22:25:43 WIB
-> Total Duration: 0m 5s
-```
-
-### Integration with personal-v4 & Direct Telegram Reporting
-
-> [!NOTE]
-> **Integration with personal-v4**
->
-> This system is integrated with [personal-v4](https://github.com/novaardiansyah/personal-v4) for Telegram webhook notifications, database tracking, reporting, and management.
->
-> However, you can also send webhook reports directly to Telegram without any intermediaries or third-party services.
-
+- [Requests](https://requests.readthedocs.io/) - HTTP library for API communication and Google Drive API
 
 ## Core Features & Workflow
 
@@ -48,7 +22,6 @@ Backup Finished
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
 - **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
 - **Bi-directional Snapshot Sync**: Synchronize snapshot archives between local disk and Google Drive by filename. Downloads the archive if missing locally, or uploads it if missing in the cloud.
-- **HMAC-SHA256 Webhook Reporting**: Deliver verified execution reports, durations, and status updates directly to Telegram notification channels.
 - **Resilient Error Handling**: Clean, user-friendly error diagnostics for password errors, archive corruption, and missing environments without noisy tracebacks.
 
 ## Quick Start & Setup
@@ -83,11 +56,6 @@ GDRIVE_UPLOAD_PATH="/backups/nova-zorin"
 BACKUP_DESTINATION="/home/user/Backups"
 RECOVERY_DESTINATION="/home/user/Backups/Recovery"
 RAR_PASSWORD="your_secure_encryption_password"
-
-# Telegram Webhook Reporting
-WEBHOOK_URL="https://your-webhook-domain.com/webhook/notifications/telegram"
-WEBHOOK_SECRET="your_hmac_secret_key"
-DEVICE_NAME="Nova-Zorin"
 
 # API Service
 API_URL="https://your-domain.com/api/system-backup"
@@ -127,7 +95,7 @@ make docker-sync FILE=backup-20261003-222538.rar
 
 This project works in tandem with:
 
-- **Personal Admin Panel (personal-v4)**: [https://github.com/novaardiansyah/personal-v4](https://github.com/novaardiansyah/personal-v4) - Central management dashboard built with [Laravel v12](https://laravel.com/docs/12.x) & [Filament v5](https://filamentphp.com/docs) for managing backup schedules, database tracking, reporting, and receiving webhook notifications.
+- **Personal Admin Panel (personal-v4)**: [https://github.com/novaardiansyah/personal-v4](https://github.com/novaardiansyah/personal-v4) - Central management dashboard built with [Laravel v12](https://laravel.com/docs/12.x) & [Filament v5](https://filamentphp.com/docs) for managing backup schedules, database tracking, and reporting.
 
 ## Credentials & Environment
 

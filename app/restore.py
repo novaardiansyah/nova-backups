@@ -14,7 +14,7 @@ from .gdrive import (
     is_gdrive_enabled,
 )
 from .logger import log_milestone
-from .webhook import format_speed, send_webhook_notification
+from .utils import format_speed
 
 
 class RestoreError(Exception):
@@ -215,17 +215,9 @@ def prompt_for_backup_file(destination: Path, logger) -> str:
 
 
 def run_restore(config: dict, logger, filename: str | None = None):
-    start_time = time.time()
     rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
     if not rar_password:
         logger.error("RESTORE FAILED: RAR_PASSWORD is not set in environment.")
-        send_webhook_notification(
-            title="Restore Failed",
-            status="Failed",
-            details={"Error": "RAR_PASSWORD is not set in environment"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise RestoreError("RAR_PASSWORD is not set in environment")
 
     backup_config = config.get("backup", {})
@@ -236,13 +228,6 @@ def run_restore(config: dict, logger, filename: str | None = None):
 
     if not filename:
         logger.error("RESTORE FAILED: No backup filename provided. Aborting restore.")
-        send_webhook_notification(
-            title="Restore Failed",
-            status="Failed",
-            details={"Error": "No backup filename provided"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise RestoreError("No backup filename provided")
 
     filename = filename.strip()
@@ -291,35 +276,11 @@ def run_restore(config: dict, logger, filename: str | None = None):
         set_global_permissions(recovery_dir)
         logger.info("RESTORE SUCCESS: Extracted to %s", recovery_dir)
 
-        send_webhook_notification(
-            title="Restore Finished",
-            status="Success",
-            details={
-                "Snapshot": target_file.name,
-                "Destination": str(recovery_dir),
-            },
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
     except RestoreError as err:
         logger.error("RESTORE FAILED: %s", err)
-        send_webhook_notification(
-            title="Restore Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise
     except Exception as err:
         logger.exception("RESTORE FAILED")
-        send_webhook_notification(
-            title="Restore Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise
     finally:
         logger.info("========================================")

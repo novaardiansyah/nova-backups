@@ -11,7 +11,7 @@ from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
-from .webhook import format_size, send_webhook_notification
+from .utils import format_size
 
 
 class SyncError(Exception):
@@ -67,7 +67,6 @@ def prompt_for_sync_file(destination: Path, logger) -> str:
 
 
 def run_sync(config: dict, logger, filename: str | None = None):
-    start_time = time.time()
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
     destination.mkdir(parents=True, exist_ok=True)
@@ -78,13 +77,6 @@ def run_sync(config: dict, logger, filename: str | None = None):
 
     if not filename:
         logger.error("SYNC FAILED: No filename provided. Aborting sync.")
-        send_webhook_notification(
-            title="Sync Failed",
-            status="Failed",
-            details={"Error": "No filename provided"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise SyncError("No filename provided")
 
     filename = Path(filename.strip()).name
@@ -125,19 +117,6 @@ def run_sync(config: dict, logger, filename: str | None = None):
             set_global_permissions(local_path)
             set_global_permissions(destination)
             logger.info("SYNC SUCCESS: Downloaded '%s' to %s", filename, local_path)
-
-            send_webhook_notification(
-                title="Sync Finished",
-                status="Success",
-                details={
-                    "Snapshot": filename,
-                    "Action": "Downloaded from Cloud",
-                    "Size": format_size(cloud_size),
-                    "Destination": str(local_path),
-                },
-                duration_seconds=time.time() - start_time,
-                logger=logger,
-            )
             return
 
         if local_exists and not cloud_exists:
@@ -149,19 +128,6 @@ def run_sync(config: dict, logger, filename: str | None = None):
             )
             upload_file_to_gdrive(local_path, logger)
             logger.info("SYNC SUCCESS: Uploaded '%s' to Google Drive", filename)
-
-            send_webhook_notification(
-                title="Sync Finished",
-                status="Success",
-                details={
-                    "Snapshot": filename,
-                    "Action": "Uploaded to Cloud",
-                    "Size": format_size(local_size),
-                    "Source": str(local_path),
-                },
-                duration_seconds=time.time() - start_time,
-                logger=logger,
-            )
             return
 
         local_size = local_path.stat().st_size
@@ -169,37 +135,12 @@ def run_sync(config: dict, logger, filename: str | None = None):
             "File '%s' already exists both locally and in Google Drive. Already synchronized.",
             filename,
         )
-        send_webhook_notification(
-            title="Sync Finished",
-            status="Success",
-            details={
-                "Snapshot": filename,
-                "Action": "Already Synchronized",
-                "Size": format_size(local_size),
-            },
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
 
     except SyncError as err:
         logger.error("SYNC FAILED: %s", err)
-        send_webhook_notification(
-            title="Sync Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise
     except Exception as err:
         logger.exception("SYNC FAILED")
-        send_webhook_notification(
-            title="Sync Failed",
-            status="Failed",
-            details={"Error": str(err)},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise
     finally:
         logger.info("========================================")

@@ -5,7 +5,7 @@ import time
 import requests
 
 from .logger import log_milestone
-from .webhook import format_speed
+from .utils import format_speed
 
 
 def is_gdrive_enabled() -> bool:

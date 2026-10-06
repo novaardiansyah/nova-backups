@@ -14,7 +14,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import log_milestone, set_global_permissions, setup_logger
-from .webhook import format_size, format_speed, send_webhook_notification
+from .utils import format_speed
 
 
 def get_snapshot_size(path: Path) -> int:
@@ -154,7 +154,6 @@ def validate_source(source_path: Path):
 
 
 def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
-    start_time = time.time()
     schedule_id = schedule.get("id")
     name = schedule.get("name", "Unnamed")
     raw_source = schedule.get("source_path", "")
@@ -286,35 +285,15 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
 
         logger.info("BACKUP ARCHIVE CREATED: %s", rar_file)
 
-        cloud_status = "Disabled"
         if is_sync_cloud and is_gdrive_enabled():
             try:
                 cloud_folder = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
                 upload_file_to_gdrive(rar_file, logger, folder_path=cloud_folder)
-                cloud_status = "Uploaded"
                 if not keep_local:
                     rar_file.unlink(missing_ok=True)
                     logger.info("Removed local archive per keep_local_backup=False")
             except Exception:
-                cloud_status = "Upload Failed"
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
-
-        rar_size = rar_file.stat().st_size if rar_file.exists() else 0
-        details = {
-            "Schedule": name,
-            "Snapshot": rar_filename,
-            "Size": format_size(rar_size) if rar_file.exists() else "Cleaned (Cloud Only)",
-            "Google Drive": cloud_status,
-            "Local Kept": "Yes" if keep_local else "No",
-        }
-
-        send_webhook_notification(
-            title="Backup Finished",
-            status="Success",
-            details=details,
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
 
         logger.info("BACKUP SUCCESS: %s", name)
         return True
@@ -324,17 +303,6 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if rar_file.exists():
             rar_file.unlink(missing_ok=True)
-
-        send_webhook_notification(
-            title="Backup Failed",
-            status="Failed",
-            details={
-                "Schedule": name,
-                "Error": str(err),
-            },
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         return False
 
     finally:
@@ -348,16 +316,8 @@ def run_backup(config=None, logger=None):
         else:
             logger = setup_logger()
 
-    start_time = time.time()
     rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
     if not rar_password:
-        send_webhook_notification(
-            title="Backup Failed",
-            status="Failed",
-            details={"Error": "RAR_PASSWORD is not set in environment"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
         raise ValueError("RAR_PASSWORD is not set in environment")
 
     schedules = fetch_backup_schedules(logger=logger)
