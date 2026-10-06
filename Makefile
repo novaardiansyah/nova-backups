@@ -8,6 +8,7 @@ endif
 
 docker-build:
 	clear
+	@git pull origin main
 	docker compose kill || true
 	docker compose down --remove-orphans
 	docker compose up -d --build

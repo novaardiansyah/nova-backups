@@ -18,6 +18,7 @@ services:
     volumes:
       - /home:/host/home:ro
       - /root:/host/root:ro
+      - /www:/host/www:ro
       - ${BACKUP_DESTINATION}:/backup
       - ${RECOVERY_DESTINATION}:/recovery
       - ./logs:/app/logs
