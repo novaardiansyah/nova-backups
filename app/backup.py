@@ -332,10 +332,36 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(created_bak, target_file)
+
+    deleted = False
     try:
         created_bak.unlink(missing_ok=True)
+        deleted = True
     except OSError:
         pass
+
+    if not deleted:
+        try:
+            import pymssql
+
+            cleanup_conn = pymssql.connect(
+                server=host,
+                port=int(port),
+                user=user,
+                password=password,
+                database="master",
+                autocommit=True,
+                login_timeout=15,
+                timeout=30,
+            )
+            clean_cursor = cleanup_conn.cursor()
+            clean_cursor.execute("EXEC sp_configure 'show advanced options', 1; RECONFIGURE;")
+            clean_cursor.execute("EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;")
+            clean_cursor.execute(f"EXEC xp_cmdshell 'rm -f {target_disk_path}'")
+            cleanup_conn.close()
+        except Exception as del_err:
+            logger.warning("Failed to remove temporary SQL Server backup file '%s': %s", target_disk_path, del_err)
+
     logger.info("SQL Server database backup completed: %s", target_file)
 
 
