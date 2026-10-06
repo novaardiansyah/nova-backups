@@ -1,51 +1,149 @@
 from datetime import datetime
 import logging
 from pathlib import Path
+import re
 
 
 class DailyRotatingFileHandler(logging.FileHandler):
-    def __init__(self, log_dir: Path, max_files: int = 7, encoding: str = "utf-8"):
+    def __init__(
+        self,
+        log_dir: Path,
+        max_files: int = 7,
+        max_bytes: int = 2 * 1024 * 1024,
+        encoding: str = "utf-8",
+    ):
         self.log_dir = log_dir
         self.max_files = max_files
+        self.max_bytes = max_bytes
         self.log_dir.mkdir(parents=True, exist_ok=True)
+
         old_backup_log = self.log_dir / "backup.log"
         if old_backup_log.exists():
             mtime_str = datetime.fromtimestamp(old_backup_log.stat().st_mtime).strftime("%Y%m%d")
-            migrated = self.log_dir / f"backup-{mtime_str}.log"
+            migrated = self.log_dir / f"backup-{mtime_str}-1.log"
             if not migrated.exists():
                 try:
                     old_backup_log.rename(migrated)
                 except OSError:
                     pass
+
+        for old_file in self.log_dir.glob("backup-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log"):
+            if old_file.is_file():
+                stem = old_file.stem
+                date_str = stem.replace("backup-", "")
+                migrated = self.log_dir / f"backup-{date_str}-1.log"
+                if not migrated.exists():
+                    try:
+                        old_file.rename(migrated)
+                    except OSError:
+                        pass
+
         self.current_date = datetime.now().strftime("%Y%m%d")
-        log_path = self.log_dir / f"backup-{self.current_date}.log"
-        super().__init__(str(log_path), encoding=encoding)
+        self.current_index = self._get_active_index_for_date(self.current_date)
+        log_path = self._get_log_path(self.current_date, self.current_index)
+        super().__init__(str(log_path.resolve()), encoding=encoding)
+        self.prune_old_logs()
+
+    def _get_log_path(self, date_str: str, index: int) -> Path:
+        return self.log_dir / f"backup-{date_str}-{index}.log"
+
+    def _get_active_index_for_date(self, date_str: str) -> int:
+        indices = []
+        pattern = re.compile(rf"^backup-{re.escape(date_str)}-(\d+)\.log$")
+        for f in self.log_dir.glob(f"backup-{date_str}-*.log"):
+            if not f.is_file():
+                continue
+            m = pattern.match(f.name)
+            if m:
+                indices.append(int(m.group(1)))
+
+        if not indices:
+            return 1
+
+        max_index = max(indices)
+        target_file = self._get_log_path(date_str, max_index)
+        try:
+            if target_file.exists() and target_file.stat().st_size >= self.max_bytes:
+                return max_index + 1
+        except OSError:
+            pass
+
+        return max_index
+
+    def should_rollover(self, record) -> bool:
+        if self.max_bytes <= 0:
+            return False
+        msg = f"{self.format(record)}\n"
+        msg_bytes = len(msg.encode(self.encoding or "utf-8"))
+        try:
+            if self.stream is None:
+                self.stream = self._open()
+            self.stream.seek(0, 2)
+            current_size = self.stream.tell()
+        except (OSError, ValueError):
+            try:
+                log_file = Path(self.baseFilename)
+                current_size = log_file.stat().st_size if log_file.exists() else 0
+            except OSError:
+                current_size = 0
+
+        if current_size >= self.max_bytes or (current_size > 0 and current_size + msg_bytes >= self.max_bytes):
+            return True
+        return False
+
+    def do_rollover(self):
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        self.current_index += 1
+        log_path = self._get_log_path(self.current_date, self.current_index)
+        while log_path.exists() and log_path.stat().st_size >= self.max_bytes:
+            self.current_index += 1
+            log_path = self._get_log_path(self.current_date, self.current_index)
+        self.baseFilename = str(log_path.resolve())
+        self.stream = self._open()
         self.prune_old_logs()
 
     def prune_old_logs(self):
         try:
-            log_files = sorted(
-                [f for f in self.log_dir.glob("backup-*.log") if f.is_file()],
-                key=lambda p: p.name,
-            )
-            if len(log_files) > self.max_files:
-                for old_file in log_files[:-self.max_files]:
-                    try:
-                        old_file.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+            date_groups = {}
+            pattern = re.compile(r"^backup-(\d{8})(?:-(\d+))?\.log$")
+            for f in self.log_dir.glob("backup-*.log"):
+                if not f.is_file():
+                    continue
+                m = pattern.match(f.name)
+                if m:
+                    d = m.group(1)
+                    date_groups.setdefault(d, []).append(f)
+
+            sorted_dates = sorted(date_groups.keys())
+            if len(sorted_dates) > self.max_files:
+                for old_date in sorted_dates[:-self.max_files]:
+                    for old_file in date_groups[old_date]:
+                        try:
+                            old_file.unlink(missing_ok=True)
+                        except OSError:
+                            pass
         except Exception:
             pass
 
     def emit(self, record):
-        today = datetime.now().strftime("%Y%m%d")
-        if today != self.current_date:
-            self.current_date = today
-            self.close()
-            self.baseFilename = str(self.log_dir / f"backup-{today}.log")
-            self.stream = self._open()
-            self.prune_old_logs()
-        super().emit(record)
+        try:
+            today = datetime.now().strftime("%Y%m%d")
+            if today != self.current_date:
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                self.current_date = today
+                self.current_index = self._get_active_index_for_date(today)
+                self.baseFilename = str(self._get_log_path(self.current_date, self.current_index).resolve())
+                self.stream = self._open()
+                self.prune_old_logs()
+            elif self.should_rollover(record):
+                self.do_rollover()
+            super().emit(record)
+        except Exception:
+            self.handleError(record)
 
 
 def get_log_dir() -> Path:
@@ -75,6 +173,7 @@ def setup_logger():
     file_handler = DailyRotatingFileHandler(
         log_dir,
         max_files=7,
+        max_bytes=2 * 1024 * 1024,
         encoding="utf-8",
     )
     file_handler.setFormatter(formatter)
