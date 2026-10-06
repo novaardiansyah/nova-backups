@@ -8,12 +8,24 @@ import subprocess
 import sys
 import time
 
+from .api import fetch_backup_schedules
 from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
-from .logger import log_milestone
+from .logger import log_milestone, setup_logger
 from .webhook import format_size, format_speed, send_webhook_notification
+
+
+def get_snapshot_size(path: Path) -> int:
+    try:
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except OSError:
+        return 0
 
 
 def execute_rar(command: list[str], destination: Path, logger, total_bytes: int = 0):
@@ -102,6 +114,32 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
         os.close(master_fd)
 
 
+def resolve_source_path(raw_path: str) -> Path:
+    p = Path(raw_path)
+    if p.exists():
+        return p
+    host_p = Path("/host") / raw_path.lstrip("/")
+    if host_p.exists():
+        return host_p
+    return p
+
+
+def resolve_destination_path(raw_path: str) -> Path:
+    if not raw_path:
+        return Path("/backup") if Path("/backup").exists() else Path("./backup")
+    backup_env = os.environ.get("BACKUP_DESTINATION", "").strip().rstrip("/")
+    if Path("/backup").exists():
+        if backup_env and raw_path.startswith(backup_env):
+            rel = raw_path[len(backup_env):].lstrip("/")
+            return Path("/backup") / rel
+        if raw_path.startswith("/backup"):
+            return Path(raw_path)
+        if "/Backups/" in raw_path:
+            rel = raw_path.split("/Backups/", 1)[1]
+            return Path("/backup") / rel
+    return Path(raw_path)
+
+
 def set_global_permissions(target: Path):
     backup_path = Path("/backup")
     target_uid = backup_path.stat().st_uid if backup_path.exists() else 0
@@ -144,104 +182,101 @@ def validate_source(source_path: Path):
         raise ValueError(f"Source must be a file or directory: {source_path}")
 
 
-def run_backup(config, logger):
+def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     start_time = time.time()
-    rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
-    if not rar_password:
-        send_webhook_notification(
-            title="Backup Failed",
-            status="Failed",
-            details={"Error": "RAR_PASSWORD is not set in environment"},
-            duration_seconds=time.time() - start_time,
-            logger=logger,
-        )
-        raise ValueError("RAR_PASSWORD is not set in environment")
+    schedule_id = schedule.get("id")
+    name = schedule.get("name", "Unnamed")
+    raw_source = schedule.get("source_path", "")
+    raw_local_dest = schedule.get("local_destination_path", "")
+    raw_cloud_dest = schedule.get("cloud_destination_path", "")
+    filename_base = schedule.get("filename", "")
+    is_sync_cloud = bool(schedule.get("is_sync_cloud", False))
+    keep_local = bool(schedule.get("keep_local_backup", False))
+    exclude_raw = schedule.get("exclude", "")
 
-    backup_config = config["backup"]
-    destination = Path(backup_config["destination"])
-    sources = backup_config["sources"]
-    excludes = config.get("exclude", [])
+    if not filename_base:
+        filename_base = datetime.now().strftime("backup-%Y%m%d-%H%M%S")
 
-    timestamp = datetime.now().strftime("backup-%Y%m%d-%H%M%S")
-    snapshot_dir = destination / timestamp
-    rar_file = destination / f"{timestamp}.rar"
+    if filename_base.endswith(".rar"):
+        rar_filename = filename_base
+        stem = filename_base[:-4]
+    else:
+        rar_filename = f"{filename_base}.rar"
+        stem = filename_base
 
-    destination.mkdir(parents=True, exist_ok=True)
-    set_global_permissions(destination)
-    snapshot_dir.mkdir(parents=True, exist_ok=False)
+    destination_dir = resolve_destination_path(raw_local_dest)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    set_global_permissions(destination_dir)
+
+    snapshot_dir = destination_dir / stem
+    rar_file = destination_dir / rar_filename
 
     logger.info("========================================")
-    logger.info("FULL BACKUP START")
-    logger.info("Snapshot: %s", snapshot_dir)
+    logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
+    logger.info("Local Destination: %s", destination_dir)
+    logger.info("Archive Name: %s", rar_filename)
+
+    excludes = []
+    if isinstance(exclude_raw, str) and exclude_raw.strip():
+        excludes = [x.strip() for x in exclude_raw.split(",") if x.strip()]
+    elif isinstance(exclude_raw, list):
+        excludes = [str(x).strip() for x in exclude_raw if str(x).strip()]
 
     try:
-        for item in sources:
-            source_path = Path(item["source"])
-            target_val = str(item.get("target", "")).strip()
-            target_str = str(item["source"]) if target_val == "-" else str(item["target"])
-            target_rel = target_str.lstrip("/")
+        source_path = resolve_source_path(raw_source)
+        validate_source(source_path)
 
-            validate_source(source_path)
+        if snapshot_dir.exists():
+            shutil.rmtree(snapshot_dir, ignore_errors=True)
+        snapshot_dir.mkdir(parents=True, exist_ok=False)
 
-            target_path = snapshot_dir / target_rel
+        logger.info("Backing up source: %s -> %s", source_path, snapshot_dir)
 
-            if source_path.is_dir():
-                target_path.mkdir(parents=True, exist_ok=True)
-                dest_path = target_path
-                command = [
-                    "rsync",
-                    "-a",
-                    "--human-readable",
-                    "--numeric-ids",
-                    "--delete",
-                ]
-                for pattern in excludes:
-                    command.append(f"--exclude={pattern}")
-                command.extend([
-                    f"{source_path}/",
-                    f"{dest_path}/",
-                ])
-            else:
-                if target_str.endswith("/") or target_path.is_dir():
-                    target_path.mkdir(parents=True, exist_ok=True)
-                    dest_path = target_path / source_path.name
-                else:
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    dest_path = target_path
-                command = [
-                    "rsync",
-                    "-a",
-                    "--human-readable",
-                    "--numeric-ids",
-                ]
-                for pattern in excludes:
-                    command.append(f"--exclude={pattern}")
-                command.extend([
-                    str(source_path),
-                    str(dest_path),
-                ])
+        if source_path.is_dir():
+            command = [
+                "rsync",
+                "-a",
+                "--human-readable",
+                "--numeric-ids",
+                "--delete",
+            ]
+            for pattern in excludes:
+                command.append(f"--exclude={pattern}")
+            command.extend([
+                f"{source_path}/",
+                f"{snapshot_dir}/",
+            ])
+        else:
+            command = [
+                "rsync",
+                "-a",
+                "--human-readable",
+                "--numeric-ids",
+            ]
+            for pattern in excludes:
+                command.append(f"--exclude={pattern}")
+            command.extend([
+                str(source_path),
+                str(snapshot_dir / source_path.name),
+            ])
 
-            logger.info("Backing up: %s -> %s", source_path, dest_path)
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
 
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
+        if result.stdout.strip():
+            logger.info(result.stdout.rstrip())
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"rsync failed for '{source_path}' with exit code {result.returncode}"
             )
 
-            if result.stdout.strip():
-                logger.info(result.stdout.rstrip())
-
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"rsync failed for '{source_path}' with exit code "
-                    f"{result.returncode}"
-                )
-
         logger.info("Compressing snapshot to encrypted RAR: %s", rar_file)
-
         snapshot_size = get_snapshot_size(snapshot_dir)
 
         rar_command = [
@@ -254,11 +289,16 @@ def run_backup(config, logger):
             "-idn",
             "-y",
             f"-hp{rar_password}",
-            f"{timestamp}.rar",
-            timestamp,
+            rar_filename,
+            stem,
         ]
 
-        returncode, rar_output = execute_rar(rar_command, destination, logger, snapshot_size)
+        returncode, rar_output = execute_rar(
+            rar_command,
+            destination_dir,
+            logger,
+            snapshot_size,
+        )
 
         if returncode not in (0, 1):
             error_details = rar_output.strip()
@@ -270,24 +310,33 @@ def run_backup(config, logger):
             raise RuntimeError("rar archive was not created or is empty")
 
         set_global_permissions(rar_file)
-        set_global_permissions(destination)
-
+        set_global_permissions(destination_dir)
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-        logger.info("FULL BACKUP SUCCESS: %s", rar_file)
+        logger.info("BACKUP ARCHIVE CREATED: %s", rar_file)
 
-        if is_gdrive_enabled():
+        cloud_status = "Disabled"
+        if is_sync_cloud and is_gdrive_enabled():
             try:
-                upload_file_to_gdrive(rar_file, logger)
+                cloud_folder = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+                upload_file_to_gdrive(rar_file, logger, folder_path=cloud_folder)
+                cloud_status = "Uploaded"
+                if not keep_local:
+                    rar_file.unlink(missing_ok=True)
+                    logger.info("Removed local archive per keep_local_backup=False")
             except Exception:
+                cloud_status = "Upload Failed"
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
 
         rar_size = rar_file.stat().st_size if rar_file.exists() else 0
         details = {
-            "Snapshot": rar_file.name,
-            "Size": format_size(rar_size),
-            "Google Drive": "Uploaded" if is_gdrive_enabled() else "Disabled",
+            "Schedule": name,
+            "Snapshot": rar_filename,
+            "Size": format_size(rar_size) if rar_file.exists() else "Cleaned (Cloud Only)",
+            "Google Drive": cloud_status,
+            "Local Kept": "Yes" if keep_local else "No",
         }
+
         send_webhook_notification(
             title="Backup Finished",
             status="Success",
@@ -296,9 +345,11 @@ def run_backup(config, logger):
             logger=logger,
         )
 
-    except Exception as err:
-        logger.exception("FULL BACKUP FAILED")
+        logger.info("BACKUP SUCCESS: %s", name)
+        return True
 
+    except Exception as err:
+        logger.exception("BACKUP FAILED: %s", name)
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if rar_file.exists():
             rar_file.unlink(missing_ok=True)
@@ -306,12 +357,65 @@ def run_backup(config, logger):
         send_webhook_notification(
             title="Backup Failed",
             status="Failed",
-            details={"Error": str(err)},
+            details={
+                "Schedule": name,
+                "Error": str(err),
+            },
             duration_seconds=time.time() - start_time,
             logger=logger,
         )
-        raise
+        return False
 
     finally:
         logger.info("========================================")
 
+
+def run_backup(config=None, logger=None):
+    if logger is None:
+        if isinstance(config, type(setup_logger())):
+            logger = config
+        else:
+            logger = setup_logger()
+
+    start_time = time.time()
+    rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
+    if not rar_password:
+        send_webhook_notification(
+            title="Backup Failed",
+            status="Failed",
+            details={"Error": "RAR_PASSWORD is not set in environment"},
+            duration_seconds=time.time() - start_time,
+            logger=logger,
+        )
+        raise ValueError("RAR_PASSWORD is not set in environment")
+
+    schedules = fetch_backup_schedules(logger=logger)
+    if not schedules:
+        logger.info("No backup schedules retrieved from API.")
+        return
+
+    enabled_schedules = [s for s in schedules if s.get("is_enabled", True)]
+    if not enabled_schedules:
+        logger.info("No enabled backup schedules to process.")
+        return
+
+    logger.info("Found %d enabled schedule(s) to backup.", len(enabled_schedules))
+
+    success_count = 0
+    fail_count = 0
+
+    for schedule in enabled_schedules:
+        success = run_single_backup(schedule, rar_password, logger)
+        if success:
+            success_count += 1
+        else:
+            fail_count += 1
+
+    logger.info(
+        "ALL BACKUP TASKS FINISHED: %d succeeded, %d failed.",
+        success_count,
+        fail_count,
+    )
+
+    if fail_count > 0 and success_count == 0:
+        raise RuntimeError(f"All {fail_count} backup task(s) failed.")

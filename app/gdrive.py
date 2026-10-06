@@ -115,15 +115,15 @@ def get_or_create_folder(folder_path: str, access_token: str) -> str:
     return current_parent_id
 
 
-def upload_file_to_gdrive(file_path: Path, logger):
+def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = None):
     access_token = get_access_token()
-    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups")
-    folder_id = get_or_create_folder(folder_path, access_token)
+    target_folder = folder_path or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups")
+    folder_id = get_or_create_folder(target_folder, access_token)
 
     file_size = file_path.stat().st_size
     file_name = file_path.name
 
-    logger.info("Uploading snapshot to Google Drive: %s -> %s", file_name, folder_path)
+    logger.info("Uploading snapshot to Google Drive: %s -> %s", file_name, target_folder)
 
     init_headers = {
         "Authorization": f"Bearer {access_token}",

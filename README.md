@@ -13,7 +13,6 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 - [RAR & UnRAR](https://www.rarlab.com/) - Password-protected encrypted snapshot compression (`-hp`)
 - [rsync](https://rsync.samba.org/) - Fast, incremental multi-source directory synchronization
 - [Google Drive API v3](https://developers.google.com/drive) - Resumable chunked cloud storage integration
-- [APScheduler](https://apscheduler.readthedocs.io/) - Advanced cron-style multi-time background scheduler
 - [Requests](https://requests.readthedocs.io/) - HTTP library for API communication, Google Drive API, and HMAC webhook delivery
 
 ## Telegram Webhook Notifications
@@ -46,7 +45,6 @@ Backup Finished
 
 - **Multi-Source Aggregation**: Consolidate disparate project folders, host paths, or volumes into structured snapshot directories using `rsync`.
 - **Encrypted Snapshot Archives**: Secure all backup archives with strong RAR header and content encryption (`-hp`), preventing unauthorized inspection.
-- **Multiple Daily Schedules**: Run automated backups across multiple specific times per day with zero cron overhead.
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
 - **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
 - **Bi-directional Snapshot Sync**: Synchronize snapshot archives between local disk and Google Drive by filename. Downloads the archive if missing locally, or uploads it if missing in the cloud.

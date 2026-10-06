@@ -4,13 +4,12 @@ from .api import run_schedules
 from .backup import run_backup
 from .logger import setup_logger
 from .restore import run_restore
-from .scheduler import start_scheduler
 from .sync import run_sync
 
 
 def main():
     logger = setup_logger()
-    mode = sys.argv[1] if len(sys.argv) > 1 else "schedule"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "backup"
 
     if mode in ("schedules", "list", "fetch-schedules"):
         try:
@@ -42,22 +41,9 @@ def main():
             sys.exit(1)
         return
 
-    if mode == "schedule":
-        try:
-            start_scheduler(
-                {},
-                lambda: run_backup({}, logger),
-                logger,
-            )
-        except Exception:
-            logger.exception("Scheduler stopped due to an error")
-            sys.exit(1)
-        return
-
     print("Usage:")
-    print("  python -m app.main schedule")
-    print("  python -m app.main schedules")
     print("  python -m app.main backup")
+    print("  python -m app.main schedules")
     print("  python -m app.main restore [filename]")
     print("  python -m app.main sync [filename]")
     sys.exit(1)
@@ -65,6 +51,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
