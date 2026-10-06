@@ -154,6 +154,187 @@ def validate_source(source_path: Path):
         raise ValueError(f"Source must be a file or directory: {source_path}")
 
 
+def dump_mysql_database(database_name: str, target_file: Path, logger):
+    host = os.environ.get("MYSQL_HOST") or "mysql-57"
+    port = os.environ.get("MYSQL_PORT") or "3306"
+    if os.environ.get("MYSQL_ROOT_PASSWORD"):
+        user = os.environ.get("MYSQL_ROOT_USER") or "root"
+        password = os.environ.get("MYSQL_ROOT_PASSWORD")
+    else:
+        user = os.environ.get("MYSQL_USER") or "root"
+        password = os.environ.get("MYSQL_PASSWORD") or ""
+
+    if not database_name:
+        raise ValueError("database_name is required for MySQL database backup")
+
+    logger.info("Dumping MySQL database '%s' from %s:%s...", database_name, host, port)
+
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+
+    base_args = [
+        f"-h{host}",
+        f"-P{port}",
+        f"-u{user}",
+        f"-p{password}",
+        "--no-tablespaces",
+        "--default-character-set=utf8mb4",
+        "--single-transaction",
+        "--quick",
+        "--routines",
+        "--triggers",
+    ]
+
+    command = ["mysqldump", *base_args, "--skip-ssl", database_name]
+
+    with open(target_file, "w", encoding="utf-8") as f:
+        result = subprocess.run(
+            command,
+            stdout=f,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+    if result.returncode != 0:
+        err_msg = result.stderr.strip() if result.stderr else f"Exit code {result.returncode}"
+        if "skip-ssl" in err_msg.lower() or "unknown option" in err_msg.lower():
+            command = ["mysqldump", *base_args, "--ssl-mode=DISABLED", database_name]
+            with open(target_file, "w", encoding="utf-8") as f:
+                result = subprocess.run(
+                    command,
+                    stdout=f,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+            if result.returncode != 0:
+                target_file.unlink(missing_ok=True)
+                err_msg = result.stderr.strip() if result.stderr else f"Exit code {result.returncode}"
+                raise RuntimeError(f"mysqldump failed for database '{database_name}': {err_msg}")
+        else:
+            target_file.unlink(missing_ok=True)
+            raise RuntimeError(f"mysqldump failed for database '{database_name}': {err_msg}")
+
+    if not target_file.exists() or target_file.stat().st_size == 0:
+        target_file.unlink(missing_ok=True)
+        raise RuntimeError(f"mysqldump produced an empty file for '{database_name}'")
+
+    set_global_permissions(target_file)
+    logger.info("MySQL database dump completed: %s", target_file)
+
+
+def find_sqlserver_backup_file(bak_filename: str) -> Path | None:
+    candidates = [
+        Path("/host/home/nova-zorin/novaardiansyah/Projects/docker/sqlserver/backups") / bak_filename,
+        Path("/home/nova-zorin/novaardiansyah/Projects/docker/sqlserver/backups") / bak_filename,
+        Path("./Projects/docker/sqlserver/backups") / bak_filename,
+        Path("/var/opt/mssql/backup") / bak_filename,
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def dump_sqlserver_database(database_name: str, target_file: Path, logger):
+    host = os.environ.get("MSSQL_HOST") or "sqlserver-latest"
+    port = os.environ.get("MSSQL_PORT") or "1433"
+    user = os.environ.get("MSSQL_USER") or "sa"
+    password = os.environ.get("MSSQL_SA_PASSWORD") or os.environ.get("MSSQL_PASSWORD") or ""
+
+    if not database_name:
+        raise ValueError("database_name is required for SQL Server database backup")
+
+    bak_filename = f"{database_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+    target_disk_path = f"/var/opt/mssql/backup/{bak_filename}"
+
+    logger.info(
+        "Executing SQL Server backup for database '%s' on %s:%s...",
+        database_name,
+        host,
+        port,
+    )
+
+    backup_query = (
+        f"BACKUP DATABASE [{database_name}] "
+        f"TO DISK = N'{target_disk_path}' "
+        f"WITH FORMAT, INIT, COMPRESSION, STATS = 10"
+    )
+
+    executed = False
+    error_details = []
+
+    try:
+        import pymssql
+
+        conn = pymssql.connect(
+            server=host,
+            port=int(port),
+            user=user,
+            password=password,
+            database="master",
+            autocommit=True,
+            login_timeout=15,
+            timeout=300,
+        )
+        cursor = conn.cursor()
+        cursor.execute(backup_query)
+        conn.close()
+        executed = True
+    except Exception as py_err:
+        error_details.append(f"pymssql error: {py_err}")
+
+    if not executed:
+        sqlcmd_command = [
+            "sqlcmd",
+            "-S",
+            f"{host},{port}",
+            "-U",
+            user,
+            "-P",
+            password,
+            "-C",
+            "-b",
+            "-Q",
+            backup_query,
+        ]
+        try:
+            res = subprocess.run(
+                sqlcmd_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0:
+                executed = True
+            else:
+                err_text = res.stderr.strip() or res.stdout.strip() or f"Exit code {res.returncode}"
+                error_details.append(f"sqlcmd error: {err_text}")
+        except FileNotFoundError:
+            error_details.append("sqlcmd utility not found in system")
+
+    if not executed:
+        raise RuntimeError(
+            f"SQL Server backup failed for '{database_name}': {'; '.join(error_details)}"
+        )
+
+    created_bak = find_sqlserver_backup_file(bak_filename)
+    if not created_bak:
+        raise FileNotFoundError(
+            f"SQL Server backup executed successfully, but '{bak_filename}' was not found in backup storage mounts."
+        )
+
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(created_bak, target_file)
+    try:
+        created_bak.unlink(missing_ok=True)
+    except OSError:
+        pass
+    set_global_permissions(target_file)
+    logger.info("SQL Server database backup completed: %s", target_file)
+
+
 def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     start_time = time.time()
     tz = ZoneInfo("Asia/Jakarta")
@@ -205,58 +386,68 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         excludes = [str(x).strip() for x in exclude_raw if str(x).strip()]
 
     try:
-        source_path = resolve_source_path(raw_source)
-        validate_source(source_path)
-
         if snapshot_dir.exists():
             shutil.rmtree(snapshot_dir, ignore_errors=True)
         snapshot_dir.mkdir(parents=True, exist_ok=False)
 
-        logger.info("Backing up source: %s -> %s", source_path, snapshot_dir)
-
-        if source_path.is_dir():
-            command = [
-                "rsync",
-                "-a",
-                "--human-readable",
-                "--numeric-ids",
-                "--delete",
-            ]
-            for pattern in excludes:
-                command.append(f"--exclude={pattern}")
-            command.extend([
-                f"{source_path}/",
-                f"{snapshot_dir}/",
-            ])
+        if backup_type == "database":
+            driver = str(schedule.get("drivers", "") or "").lower().strip()
+            db_name = str(schedule.get("database_name", "") or "").strip()
+            if driver in ("mysql", "mariadb"):
+                dump_mysql_database(db_name, snapshot_dir / f"{db_name}.sql", logger)
+            elif driver in ("sqlsrv", "sqlserver", "mssql"):
+                dump_sqlserver_database(db_name, snapshot_dir / f"{db_name}.bak", logger)
+            else:
+                raise ValueError(f"Unsupported database driver '{driver}' for schedule '{name}'")
         else:
-            command = [
-                "rsync",
-                "-a",
-                "--human-readable",
-                "--numeric-ids",
-            ]
-            for pattern in excludes:
-                command.append(f"--exclude={pattern}")
-            command.extend([
-                str(source_path),
-                str(snapshot_dir / source_path.name),
-            ])
+            source_path = resolve_source_path(raw_source)
+            validate_source(source_path)
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
+            logger.info("Backing up source: %s -> %s", source_path, snapshot_dir)
 
-        if result.stdout.strip():
-            logger.info(result.stdout.rstrip())
+            if source_path.is_dir():
+                command = [
+                    "rsync",
+                    "-a",
+                    "--human-readable",
+                    "--numeric-ids",
+                    "--delete",
+                ]
+                for pattern in excludes:
+                    command.append(f"--exclude={pattern}")
+                command.extend([
+                    f"{source_path}/",
+                    f"{snapshot_dir}/",
+                ])
+            else:
+                command = [
+                    "rsync",
+                    "-a",
+                    "--human-readable",
+                    "--numeric-ids",
+                ]
+                for pattern in excludes:
+                    command.append(f"--exclude={pattern}")
+                command.extend([
+                    str(source_path),
+                    str(snapshot_dir / source_path.name),
+                ])
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"rsync failed for '{source_path}' with exit code {result.returncode}"
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
             )
+
+            if result.stdout.strip():
+                logger.info(result.stdout.rstrip())
+
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"rsync failed for '{source_path}' with exit code {result.returncode}"
+                )
 
         logger.info("Compressing snapshot to encrypted RAR: %s", rar_file)
         snapshot_size = get_snapshot_size(snapshot_dir)

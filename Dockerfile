@@ -7,7 +7,7 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       sed -i 's/main/main contrib non-free non-free-firmware/g' /etc/apt/sources.list; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends rsync rar \
+    && apt-get install -y --no-install-recommends rsync rar default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
