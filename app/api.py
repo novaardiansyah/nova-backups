@@ -248,19 +248,15 @@ def run_schedules(logger=None) -> list[dict]:
             source = item.get("source_path", "-")
             dest = item.get("local_destination_path", "-")
             cloud = item.get("cloud_destination_path", "-")
-            next_run = item.get("next_backup_at", "-")
-            last_run = item.get("last_backup_at", "-")
             enabled = item.get("is_enabled", False)
             exclude = item.get("exclude", "-")
 
             logger.info(
-                "[%d] %s (Type: %s) | Enabled: %s | Next: %s | Last: %s | Source: %s | Local: %s | Cloud: %s | Exclude: %s",
+                "[%d] %s (Type: %s) | Enabled: %s | Source: %s | Local: %s | Cloud: %s | Exclude: %s",
                 idx,
                 name,
                 backup_type,
                 enabled,
-                next_run,
-                last_run,
                 source,
                 dest,
                 cloud,
