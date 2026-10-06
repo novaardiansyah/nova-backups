@@ -30,7 +30,7 @@ def get_access_token() -> str:
         "grant_type": "refresh_token",
     }
 
-    resp = requests.post(token_uri, data=data, timeout=30)
+    resp = requests.post(token_uri, data=data, timeout=120)
     if resp.status_code != 200:
         raise RuntimeError(
             f"Failed to refresh Google Drive access token: {resp.status_code} {resp.text}"
@@ -79,7 +79,7 @@ def get_or_create_folder(folder_path: str, access_token: str) -> str:
             "https://www.googleapis.com/drive/v3/files",
             headers=headers,
             params=params,
-            timeout=30,
+            timeout=120,
         )
 
         if resp.status_code != 200:
@@ -104,7 +104,7 @@ def get_or_create_folder(folder_path: str, access_token: str) -> str:
                 "https://www.googleapis.com/drive/v3/files",
                 headers=create_headers,
                 json=body,
-                timeout=30,
+                timeout=120,
             )
             if create_resp.status_code not in (200, 201):
                 raise RuntimeError(
@@ -141,7 +141,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable",
         headers=init_headers,
         json=metadata,
-        timeout=30,
+        timeout=120,
     )
 
     if init_resp.status_code != 200:
@@ -179,7 +179,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
                 upload_url,
                 data=chunk,
                 headers=chunk_headers,
-                timeout=60,
+                timeout=120,
             )
             chunk_duration = time.time() - chunk_start
             if chunk_duration > 0:
@@ -252,7 +252,7 @@ def list_cloud_backups(folder_id: str, access_token: str) -> list[dict]:
             "https://www.googleapis.com/drive/v3/files",
             headers=headers,
             params=params,
-            timeout=30,
+            timeout=120,
         )
         if resp.status_code != 200:
             raise RuntimeError(
@@ -276,7 +276,7 @@ def delete_cloud_file(file_id: str, access_token: str):
     resp = requests.delete(
         f"https://www.googleapis.com/drive/v3/files/{file_id}",
         headers=headers,
-        timeout=30,
+        timeout=120,
     )
     if resp.status_code not in (200, 204):
         raise RuntimeError(
@@ -315,7 +315,7 @@ def find_cloud_backup(filename: str, folder_path: str | None = None) -> dict | N
         "https://www.googleapis.com/drive/v3/files",
         headers=headers,
         params=params,
-        timeout=30,
+        timeout=120,
     )
 
     if resp.status_code != 200:
@@ -360,7 +360,7 @@ def get_cloud_backup_names(folder_path: str | None = None) -> list[str]:
                 "https://www.googleapis.com/drive/v3/files",
                 headers=headers,
                 params=params,
-                timeout=30,
+                timeout=120,
             )
             if resp.status_code != 200:
                 raise RuntimeError(
@@ -386,7 +386,7 @@ def download_cloud_file(file_id: str, target_path: Path, expected_size: int, log
         f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media",
         headers=headers,
         stream=True,
-        timeout=60,
+        timeout=120,
     )
 
     if resp.status_code != 200:
