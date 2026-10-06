@@ -267,3 +267,51 @@ def run_schedules(logger=None) -> list[dict]:
         logger.exception("Failed to fetch backup schedules: %s", err)
         raise
 
+
+def send_backup_report(
+    payload: dict,
+    api_url: str | None = None,
+    logger=None,
+) -> dict | None:
+    base_url = (api_url or get_env_var("API_URL") or "").rstrip("/")
+    if not base_url:
+        if logger:
+            logger.warning("API_URL is not set. Skipping backup report.")
+        return None
+
+    backups_url = f"{base_url}/backups"
+    token = get_valid_token(logger=logger)
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    if logger:
+        logger.info("Sending backup report to API (%s)...", payload.get("status"))
+
+    resp = requests.post(backups_url, json=payload, headers=headers, timeout=30)
+
+    if resp.status_code == 401:
+        if logger:
+            logger.warning("Token expired or rejected. Refreshing token and retrying...")
+        token = get_valid_token(force_refresh=True, logger=logger)
+        headers["Authorization"] = f"Bearer {token}"
+        resp = requests.post(backups_url, json=payload, headers=headers, timeout=30)
+
+    if resp.status_code not in (200, 201):
+        if logger:
+            logger.warning(
+                "Failed to send backup report (%d): %s",
+                resp.status_code,
+                resp.text,
+            )
+        return None
+
+    resp_json = resp.json()
+    if logger:
+        logger.info("Backup report successfully recorded by API.")
+    return resp_json
+
+

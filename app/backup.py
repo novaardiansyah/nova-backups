@@ -7,14 +7,15 @@ import shutil
 import subprocess
 import sys
 import time
+from zoneinfo import ZoneInfo
 
-from .api import fetch_backup_schedules
+from .api import fetch_backup_schedules, send_backup_report
 from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
 from .logger import log_milestone, set_global_permissions, setup_logger
-from .utils import format_speed
+from .utils import calculate_checksum, format_speed
 
 
 def get_snapshot_size(path: Path) -> int:
@@ -154,8 +155,15 @@ def validate_source(source_path: Path):
 
 
 def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
+    start_time = time.time()
+    tz = ZoneInfo("Asia/Jakarta")
+    started_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+
     schedule_id = schedule.get("id")
     name = schedule.get("name", "Unnamed")
+    backup_type = schedule.get("type", "files")
+    storage_id = schedule.get("storage_id")
+    server_id = schedule.get("server_id")
     raw_source = schedule.get("source_path", "")
     raw_local_dest = schedule.get("local_destination_path", "")
     raw_cloud_dest = schedule.get("cloud_destination_path", "")
@@ -165,7 +173,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     exclude_raw = schedule.get("exclude", "")
 
     if not filename_base:
-        filename_base = datetime.now().strftime("backup-%Y%m%d-%H%M%S")
+        filename_base = datetime.now(tz).strftime("backup-%Y%m%d-%H%M%S")
 
     if filename_base.endswith(".rar"):
         rar_filename = filename_base
@@ -180,6 +188,10 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
 
     snapshot_dir = destination_dir / stem
     rar_file = destination_dir / rar_filename
+
+    local_file_path = f"{raw_local_dest.rstrip('/')}/{rar_filename}" if raw_local_dest else str(rar_file)
+    cloud_dest = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+    cloud_file_path = f"{cloud_dest.rstrip('/')}/{rar_filename}" if (is_sync_cloud and is_gdrive_enabled()) else None
 
     logger.info("========================================")
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
@@ -285,6 +297,9 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
 
         logger.info("BACKUP ARCHIVE CREATED: %s", rar_file)
 
+        rar_size = rar_file.stat().st_size if rar_file.exists() else 0
+        checksum = calculate_checksum(rar_file)
+
         if is_sync_cloud and is_gdrive_enabled():
             try:
                 cloud_folder = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
@@ -295,6 +310,34 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
             except Exception:
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
 
+        end_time = time.time()
+        completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        duration = max(0, int(end_time - start_time))
+
+        if schedule_id is not None:
+            report_payload = {
+                "schedule_id": schedule_id,
+                "file_name": rar_filename,
+                "file_path": local_file_path,
+                "cloud_file_path": cloud_file_path,
+                "file_size": rar_size,
+                "checksum": checksum,
+                "type": backup_type,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration": duration,
+                "status": "success",
+                "message": None,
+            }
+            if storage_id is not None:
+                report_payload["storage_id"] = storage_id
+            if server_id is not None:
+                report_payload["server_id"] = server_id
+            try:
+                send_backup_report(report_payload, logger=logger)
+            except Exception as report_err:
+                logger.warning("Failed to send backup report to API: %s", report_err)
+
         logger.info("BACKUP SUCCESS: %s", name)
         return True
 
@@ -303,6 +346,35 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if rar_file.exists():
             rar_file.unlink(missing_ok=True)
+
+        end_time = time.time()
+        completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        duration = max(0, int(end_time - start_time))
+
+        if schedule_id is not None:
+            report_payload = {
+                "schedule_id": schedule_id,
+                "file_name": rar_filename,
+                "file_path": local_file_path,
+                "cloud_file_path": cloud_file_path,
+                "file_size": 0,
+                "checksum": None,
+                "type": backup_type,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "duration": duration,
+                "status": "failed",
+                "message": str(err),
+            }
+            if storage_id is not None:
+                report_payload["storage_id"] = storage_id
+            if server_id is not None:
+                report_payload["server_id"] = server_id
+            try:
+                send_backup_report(report_payload, logger=logger)
+            except Exception as report_err:
+                logger.warning("Failed to send backup failure report to API: %s", report_err)
+
         return False
 
     finally:

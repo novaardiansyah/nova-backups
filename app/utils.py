@@ -1,3 +1,7 @@
+import hashlib
+from pathlib import Path
+
+
 def format_size(size_bytes: int | float) -> str:
     if size_bytes < 0:
         return "0 B"
@@ -21,3 +25,16 @@ def format_speed(bytes_per_sec: float) -> str:
     if bytes_per_sec <= 0:
         return "0 B/s"
     return f"{format_size(bytes_per_sec)}/s"
+
+
+def calculate_checksum(file_path: Path) -> str | None:
+    try:
+        if not file_path.exists() or not file_path.is_file():
+            return None
+        sha256 = hashlib.sha256()
+        with file_path.open("rb") as f:
+            while chunk := f.read(65536):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except OSError:
+        return None
