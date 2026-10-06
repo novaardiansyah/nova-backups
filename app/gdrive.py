@@ -117,7 +117,7 @@ def get_or_create_folder(folder_path: str, access_token: str) -> str:
 
 def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = None):
     access_token = get_access_token()
-    target_folder = folder_path or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups")
+    target_folder = folder_path or "/backups"
     folder_id = get_or_create_folder(target_folder, access_token)
 
     file_size = file_path.stat().st_size
@@ -284,19 +284,23 @@ def delete_cloud_file(file_id: str, access_token: str):
         )
 
 
-def find_cloud_backup(filename: str) -> dict | None:
+def find_cloud_backup(filename: str, folder_path: str | None = None) -> dict | None:
     if not is_gdrive_enabled():
         return None
 
     access_token = get_access_token()
-    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
-    folder_id = get_or_create_folder(folder_path, access_token)
-
     safe_name = filename.replace("'", r"\'")
-    query = (
-        f"name = '{safe_name}' and '{folder_id}' in parents and "
-        f"mimeType != 'application/vnd.google-apps.folder' and trashed = false"
-    )
+    if folder_path:
+        folder_id = get_or_create_folder(folder_path, access_token)
+        query = (
+            f"name = '{safe_name}' and '{folder_id}' in parents and "
+            f"mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+        )
+    else:
+        query = (
+            f"name = '{safe_name}' and "
+            f"mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+        )
     params = {
         "q": query,
         "spaces": "drive",
@@ -325,14 +329,50 @@ def find_cloud_backup(filename: str) -> dict | None:
     return None
 
 
-def get_cloud_backup_names() -> list[str]:
+def get_cloud_backup_names(folder_path: str | None = None) -> list[str]:
     if not is_gdrive_enabled():
         return []
 
     access_token = get_access_token()
-    folder_path = os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
-    folder_id = get_or_create_folder(folder_path, access_token)
-    files = list_cloud_backups(folder_id, access_token)
+    if folder_path:
+        folder_id = get_or_create_folder(folder_path, access_token)
+        files = list_cloud_backups(folder_id, access_token)
+    else:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+        query = "mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+        params = {
+            "q": query,
+            "spaces": "drive",
+            "fields": "nextPageToken, files(id, name, createdTime, size)",
+            "orderBy": "name",
+            "pageSize": 100,
+        }
+
+        files = []
+        page_token = None
+
+        while True:
+            if page_token:
+                params["pageToken"] = page_token
+            resp = requests.get(
+                "https://www.googleapis.com/drive/v3/files",
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"Failed to list files in Google Drive: {resp.status_code} {resp.text}"
+                )
+
+            data = resp.json()
+            files.extend(data.get("files", []))
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
     return [f.get("name", "") for f in files if f.get("name")]
 
 

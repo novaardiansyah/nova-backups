@@ -371,7 +371,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     rar_file = destination_dir / rar_filename
 
     local_file_path = f"{raw_local_dest.rstrip('/')}/{rar_filename}" if raw_local_dest else str(rar_file)
-    cloud_dest = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+    cloud_dest = raw_cloud_dest or "/backups"
     cloud_file_path = f"{cloud_dest.rstrip('/')}/{rar_filename}" if (is_sync_cloud and is_gdrive_enabled()) else None
 
     logger.info("========================================")
@@ -493,7 +493,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
 
         if is_sync_cloud and is_gdrive_enabled():
             try:
-                cloud_folder = raw_cloud_dest or os.environ.get("GDRIVE_UPLOAD_PATH", "/backups/nova-zorin")
+                cloud_folder = raw_cloud_dest or "/backups"
                 upload_file_to_gdrive(rar_file, logger, folder_path=cloud_folder)
                 if not keep_local:
                     rar_file.unlink(missing_ok=True)

@@ -21,7 +21,6 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 - **Encrypted Snapshot Archives**: Secure all backup archives with strong RAR header and content encryption (`-hp`), preventing unauthorized inspection.
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
 - **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
-- **Bi-directional Snapshot Sync**: Synchronize snapshot archives between local disk and Google Drive by filename. Downloads the archive if missing locally, or uploads it if missing in the cloud.
 - **Resilient Error Handling**: Clean, user-friendly error diagnostics for password errors, archive corruption, and missing environments without noisy tracebacks.
 
 ## Quick Start & Setup
@@ -54,7 +53,6 @@ BACKUP_INTERVAL="5m"
 OAUTH_CLIENT_ID="your_google_client_id"
 OAUTH_CLIENT_SECRET="your_google_client_secret"
 OAUTH_REFRESH_TOKEN="your_google_refresh_token"
-GDRIVE_UPLOAD_PATH="/backups/nova-zorin"
 
 # Docker & Backup Storage
 BACKUP_DESTINATION="/home/user/Backups"
@@ -90,9 +88,6 @@ make docker-restore
 
 # Restore specific backup file
 make docker-restore FILE=backup-20261003-222538.rar
-
-# Sync specific backup file between local and Google Drive
-make docker-sync FILE=backup-20261003-222538.rar
 ```
 
 ## Related Repositories

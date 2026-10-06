@@ -5,7 +5,6 @@ from .backup import run_backup
 from .logger import setup_logger
 from .restore import run_restore
 from .scheduler import run_scheduler
-from .sync import run_sync
 
 
 def main():
@@ -41,20 +40,11 @@ def main():
             sys.exit(1)
         return
 
-    if mode == "sync":
-        filename = sys.argv[2] if len(sys.argv) > 2 else None
-        try:
-            run_sync({}, logger, filename)
-        except Exception:
-            sys.exit(1)
-        return
-
     print("Usage:")
     print("  python -m app.main scheduler")
     print("  python -m app.main backup")
     print("  python -m app.main schedules")
     print("  python -m app.main restore [filename]")
-    print("  python -m app.main sync [filename]")
     sys.exit(1)
 
 
