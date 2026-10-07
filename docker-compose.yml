@@ -19,9 +19,11 @@ services:
       - /home:/host/home
       - /root:/host/root
       - /www:/host/www
+      - /etc:/host/etc
+      - /var:/host/var
+      - ./logs:/app/logs
       - ${BACKUP_DESTINATION}:/backup
       - ${RECOVERY_DESTINATION}:/recovery
-      - ./logs:/app/logs
 
     networks:
       - mysql_network
