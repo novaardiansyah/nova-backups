@@ -9,7 +9,7 @@ import sys
 import time
 from zoneinfo import ZoneInfo
 
-from .api import fetch_backup_schedules, send_backup_report
+from .api import fetch_backup_schedules, mark_backup_schedule_started, send_backup_report
 from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
@@ -381,6 +381,12 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
     logger.info("Local Destination: %s", destination_dir)
     logger.info("Archive Name: %s", rar_filename)
+
+    if schedule_id is not None:
+        try:
+            mark_backup_schedule_started(schedule_id, logger=logger)
+        except Exception as start_err:
+            logger.warning("Failed to notify API of backup start: %s", start_err)
 
     excludes = []
     if isinstance(exclude_raw, str) and exclude_raw.strip():

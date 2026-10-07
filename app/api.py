@@ -134,7 +134,7 @@ def api_login(
     if logger:
         logger.info("Authenticating with API at %s...", login_url)
 
-    resp = requests.post(login_url, json=payload, headers=headers, timeout=30)
+    resp = requests.post(login_url, json=payload, headers=headers, timeout=120)
     if resp.status_code != 200:
         raise RuntimeError(f"API login failed ({resp.status_code}): {resp.text}")
 
@@ -206,14 +206,14 @@ def fetch_backup_schedules(
     if logger:
         logger.info("Requesting backup schedules from API for server '%s'...", slug)
 
-    resp = requests.get(schedules_url, headers=headers, params=params, timeout=30)
+    resp = requests.get(schedules_url, headers=headers, params=params, timeout=120)
 
     if resp.status_code == 401:
         if logger:
             logger.warning("Token expired or rejected. Refreshing token and retrying...")
         token = get_valid_token(force_refresh=True, logger=logger)
         headers["Authorization"] = f"Bearer {token}"
-        resp = requests.get(schedules_url, headers=headers, params=params, timeout=30)
+        resp = requests.get(schedules_url, headers=headers, params=params, timeout=120)
 
     if resp.status_code != 200:
         raise RuntimeError(
@@ -291,14 +291,14 @@ def send_backup_report(
     if logger:
         logger.info("Sending backup report to API (%s)...", payload.get("status"))
 
-    resp = requests.post(backups_url, json=payload, headers=headers, timeout=30)
+    resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
 
     if resp.status_code == 401:
         if logger:
             logger.warning("Token expired or rejected. Refreshing token and retrying...")
         token = get_valid_token(force_refresh=True, logger=logger)
         headers["Authorization"] = f"Bearer {token}"
-        resp = requests.post(backups_url, json=payload, headers=headers, timeout=30)
+        resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
 
     if resp.status_code not in (200, 201):
         if logger:
@@ -313,5 +313,53 @@ def send_backup_report(
     if logger:
         logger.info("Backup report successfully recorded by API.")
     return resp_json
+
+
+def mark_backup_schedule_started(
+    schedule_id: int | str,
+    api_url: str | None = None,
+    logger=None,
+) -> dict | None:
+    base_url = (api_url or get_env_var("API_URL") or "").rstrip("/")
+    if not base_url:
+        if logger:
+            logger.warning("API_URL is not set. Skipping mark backup schedule started.")
+        return None
+
+    start_url = f"{base_url}/schedules/{schedule_id}/start"
+    token = get_valid_token(logger=logger)
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    if logger:
+        logger.info("Notifying API that backup schedule ID %s has started...", schedule_id)
+
+    resp = requests.post(start_url, headers=headers, timeout=120)
+
+    if resp.status_code == 401:
+        if logger:
+            logger.warning("Token expired or rejected. Refreshing token and retrying...")
+        token = get_valid_token(force_refresh=True, logger=logger)
+        headers["Authorization"] = f"Bearer {token}"
+        resp = requests.post(start_url, headers=headers, timeout=120)
+
+    if resp.status_code not in (200, 201):
+        if logger:
+            logger.warning(
+                "Failed to notify API of schedule start (%d): %s",
+                resp.status_code,
+                resp.text,
+            )
+        return None
+
+    resp_json = resp.json()
+    if logger:
+        logger.info("Schedule ID %s start timestamp successfully recorded by API.", schedule_id)
+    return resp_json
+
 
 
