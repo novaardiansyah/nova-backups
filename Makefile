@@ -13,11 +13,7 @@ docker-build:
 	@echo "[INFO] Pulling latest changes from GitHub..."
 	@git pull origin main
 
-	@echo "[INFO] Killing docker compose..."
-	docker compose kill || true
-
-	@echo "[INFO] Removing docker compose..."
-	docker compose down --remove-orphans
+	@make docker-down
 
 	@echo "[INFO] Building docker compose..."
 	docker compose up -d --build
@@ -26,6 +22,13 @@ docker-build:
 	@make permissions
 
 	@echo "[INFO] Docker Build is finished..."
+
+docker-down:
+	@echo "[INFO] Killing docker compose..."
+	docker compose kill || true
+
+	@echo "[INFO] Removing docker compose..."
+	docker compose down --remove-orphans
 
 docker-logs:
 	clear
