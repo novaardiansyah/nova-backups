@@ -24,7 +24,14 @@ def get_snapshot_size(path: Path) -> int:
             return 0
         if path.is_file():
             return path.stat().st_size
-        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+        total = 0
+        for root, _, files in os.walk(path):
+            for file in files:
+                try:
+                    total += (Path(root) / file).stat().st_size
+                except OSError:
+                    pass
+        return total
     except OSError:
         return 0
 
@@ -121,13 +128,12 @@ def execute_rar(command: list[str], destination: Path, logger, total_bytes: int 
 
 
 def resolve_source_path(raw_path: str) -> Path:
-    p = Path(raw_path)
-    if p.exists():
-        return p
-    host_p = Path("/host") / raw_path.lstrip("/")
-    if host_p.exists():
-        return host_p
-    return p
+    raw_str = str(raw_path).strip()
+    if raw_str.startswith("/host"):
+        return Path(raw_str)
+    if Path("/host").exists():
+        return Path("/host") / raw_str.lstrip("/")
+    return Path(raw_str)
 
 
 def resolve_destination_path(raw_path: str) -> Path:
