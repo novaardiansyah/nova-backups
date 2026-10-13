@@ -6,14 +6,14 @@ ifeq ($(filter $(firstword $(MAKECMDGOALS)),docker-restore),$(firstword $(MAKECM
   endif
 endif
 
-docker-build:
+up:
 	clear
 	
 	@echo "[INFO] Docker Build is starting..."
 	@echo "[INFO] Pulling latest changes from GitHub..."
-	@git pull origin main
+	# @git pull origin main
 
-	@make docker-down
+	@make down
 
 	@echo "[INFO] Building docker compose..."
 	docker compose up -d --build
@@ -23,26 +23,26 @@ docker-build:
 
 	@echo "[INFO] Docker Build is finished..."
 
-docker-down:
+down:
 	@echo "[INFO] Killing docker compose..."
 	docker compose kill || true
 
 	@echo "[INFO] Removing docker compose..."
 	docker compose down --remove-orphans
 
-docker-logs:
+logs:
 	clear
 	docker compose logs -f
 
-docker-backup:
+backup:
 	clear
 	docker compose exec backup python -m app.main backup
 
-docker-restore:
+restore:
 	clear
 	docker compose exec backup python -m app.main restore $(FILE)
 
-docker-schedules:
+schedules:
 	clear
 	docker compose exec backup python -m app.main schedules
 
