@@ -70,7 +70,7 @@ class ProgressReporter:
     milestone = (processed // self.milestone_step) * self.milestone_step
     if milestone > 0 and milestone > self.last_milestone:
       self.last_milestone = milestone
-      log_milestone(self.logger, f"{self.label}: {format_size(milestone)}{speed_display}", self.is_tty)
+      log_milestone(self.logger, f"{self.label}: {format_size(milestone)} ({val}%){speed_display}", self.is_tty)
 
   def finish(self):
     if self.is_tty and self.last_percent != -1:
@@ -82,7 +82,7 @@ class ProgressReporter:
     final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
 
     if self.total_bytes > 0 and self.last_milestone < self.total_bytes:
-      log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)}{final_speed_str}", self.is_tty)
+      log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)} (100%){final_speed_str}", self.is_tty)
       self.last_milestone = self.total_bytes
 
 

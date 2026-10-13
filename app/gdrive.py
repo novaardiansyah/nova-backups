@@ -210,7 +210,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
             milestone = (uploaded // milestone_step) * milestone_step
             if milestone > 0 and milestone > last_milestone:
                 last_milestone = milestone
-                log_milestone(logger, f"Uploading to Google Drive: {format_size(milestone)} ({last_speed_str})", is_tty)
+                log_milestone(logger, f"Uploading to Google Drive: {format_size(milestone)} ({val}%) ({last_speed_str})", is_tty)
 
     if is_tty and last_percent != -1:
         sys.stdout.write("\n")
@@ -221,7 +221,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
     final_speed_str = format_speed(avg_speed)
 
     if uploaded > 0 and last_milestone < uploaded:
-        log_milestone(logger, f"Uploading to Google Drive: {format_size(uploaded)} ({final_speed_str})", is_tty)
+        log_milestone(logger, f"Uploading to Google Drive: {format_size(uploaded)} (100%) ({final_speed_str})", is_tty)
         last_milestone = uploaded
 
     logger.info("UPLOAD TO GOOGLE DRIVE SUCCESS: %s", file_name)
