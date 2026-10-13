@@ -31,7 +31,7 @@ down:
 	@echo "[INFO] Removing docker compose..."
 	docker compose down --remove-orphans
 
-logs:
+docker-logs:
 	clear
 	docker compose logs -f
 
