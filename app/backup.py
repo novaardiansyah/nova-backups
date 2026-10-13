@@ -1,130 +1,19 @@
 from datetime import datetime
 import os
 from pathlib import Path
-import pty
-import re
 import shutil
 import subprocess
-import sys
 import time
 from zoneinfo import ZoneInfo
 
 from .api import fetch_backup_schedules, mark_backup_schedule_started, send_backup_report
+from .archive import create_encrypted_zip
 from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
 )
-from .logger import log_milestone, setup_logger
-from .utils import BackupLock, calculate_checksum, cleanup_empty_directories, format_speed
-
-
-def get_snapshot_size(path: Path) -> int:
-    try:
-        if not path.exists():
-            return 0
-        if path.is_file():
-            return path.stat().st_size
-        total = 0
-        for root, _, files in os.walk(path):
-            for file in files:
-                try:
-                    total += (Path(root) / file).stat().st_size
-                except OSError:
-                    pass
-        return total
-    except OSError:
-        return 0
-
-
-def execute_rar(command: list[str], destination: Path, logger, total_bytes: int = 0):
-    master_fd, slave_fd = pty.openpty()
-    try:
-        proc = subprocess.Popen(
-            command,
-            cwd=str(destination),
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-    except Exception:
-        os.close(slave_fd)
-        os.close(master_fd)
-        raise
-
-    os.close(slave_fd)
-    try:
-        output_chunks = []
-        last_percent = -1
-        last_milestone = 0
-        stream_buffer = ""
-        is_tty = sys.stdout.isatty()
-        start_time = time.time()
-        last_sample_time = start_time
-        last_sample_bytes = 0.0
-        last_speed_str = "0 B/s"
-
-        while True:
-            try:
-                chunk = os.read(master_fd, 1024)
-                if not chunk:
-                    break
-                text = chunk.decode("utf-8", errors="ignore")
-                output_chunks.append(text)
-                stream_buffer += text
-
-                matches = re.findall(r"(\d{1,3})%", stream_buffer)
-                if matches:
-                    val = int(matches[-1])
-                    if 0 <= val <= 100 and val != last_percent:
-                        last_percent = val
-
-                        if total_bytes > 0:
-                            current_processed = total_bytes * (val / 100.0)
-                            now = time.time()
-                            delta_time = now - last_sample_time
-                            if delta_time >= 0.5:
-                                speed = (current_processed - last_sample_bytes) / delta_time
-                                last_speed_str = format_speed(speed)
-                                last_sample_time = now
-                                last_sample_bytes = current_processed
-                            elif last_speed_str == "0 B/s":
-                                elapsed = now - start_time
-                                if elapsed > 0:
-                                    last_speed_str = format_speed(current_processed / elapsed)
-                            speed_display = f" ({last_speed_str})"
-                        else:
-                            speed_display = ""
-
-                        if is_tty:
-                            sys.stdout.write(f"\rCompressing snapshot: {val}%{speed_display}\033[K")
-                            sys.stdout.flush()
-
-                        milestone = (val // 25) * 25
-                        if milestone > 0 and milestone > last_milestone:
-                            last_milestone = milestone
-                            log_milestone(logger, f"Compressing snapshot: {milestone}%{speed_display}", is_tty)
-
-                stream_buffer = stream_buffer[-32:]
-            except OSError:
-                break
-
-        if is_tty and last_percent != -1:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-        total_duration = time.time() - start_time
-        avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
-        final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
-
-        if last_percent != -1 and last_milestone < 100:
-            log_milestone(logger, f"Compressing snapshot: 100%{final_speed_str}", is_tty)
-            last_milestone = 100
-
-        proc.wait()
-        full_output = "".join(output_chunks)
-        return proc.returncode, full_output
-    finally:
-        os.close(master_fd)
+from .logger import setup_logger
+from .utils import BackupLock, calculate_checksum, cleanup_empty_directories
 
 
 def resolve_source_path(raw_path: str) -> Path:
@@ -345,7 +234,7 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
     logger.info("SQL Server database backup completed: %s", target_file)
 
 
-def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
+def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
     start_time = time.time()
     tz = ZoneInfo("Asia/Jakarta")
     started_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -366,27 +255,27 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     if not filename_base:
         filename_base = datetime.now(tz).strftime("backup-%Y%m%d-%H%M%S")
 
-    if filename_base.endswith(".rar"):
-        rar_filename = filename_base
+    if filename_base.endswith(".zip"):
+        zip_filename = filename_base
         stem = filename_base[:-4]
     else:
-        rar_filename = f"{filename_base}.rar"
+        zip_filename = f"{filename_base}.zip"
         stem = filename_base
 
     destination_dir = resolve_destination_path(raw_local_dest)
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot_dir = destination_dir / stem
-    rar_file = destination_dir / rar_filename
+    zip_file = destination_dir / zip_filename
 
-    local_file_path = f"{raw_local_dest.rstrip('/')}/{rar_filename}" if raw_local_dest else str(rar_file)
+    local_file_path = f"{raw_local_dest.rstrip('/')}/{zip_filename}" if raw_local_dest else str(zip_file)
     cloud_dest = raw_cloud_dest or "/backups"
-    cloud_file_path = f"{cloud_dest.rstrip('/')}/{rar_filename}" if (is_sync_cloud and is_gdrive_enabled()) else None
+    cloud_file_path = f"{cloud_dest.rstrip('/')}/{zip_filename}" if (is_sync_cloud and is_gdrive_enabled()) else None
 
     logger.info("========================================")
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
     logger.info("Local Destination: %s", destination_dir)
-    logger.info("Archive Name: %s", rar_filename)
+    logger.info("Archive Name: %s", zip_filename)
 
     if schedule_id is not None:
         try:
@@ -464,52 +353,32 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
                     f"rsync failed for '{source_path}' with exit code {result.returncode}"
                 )
 
-        logger.info("Compressing snapshot to encrypted RAR: %s", rar_file)
-        snapshot_size = get_snapshot_size(snapshot_dir)
+        logger.info("Compressing snapshot to encrypted ZIP: %s", zip_file)
 
-        rar_command = [
-            "rar",
-            "a",
-            "-r",
-            "-ol",
-            "-idc",
-            "-idd",
-            "-idn",
-            "-y",
-            f"-hp{rar_password}",
-            rar_filename,
-            stem,
-        ]
+        if zip_file.exists():
+            zip_file.unlink()
 
-        returncode, rar_output = execute_rar(
-            rar_command,
-            destination_dir,
-            logger,
-            snapshot_size,
-        )
+        try:
+            create_encrypted_zip(snapshot_dir, zip_file, zip_password, logger)
+        except Exception as zip_err:
+            raise RuntimeError(f"zip compression failed: {zip_err}") from zip_err
 
-        if returncode not in (0, 1):
-            error_details = rar_output.strip()
-            raise RuntimeError(
-                f"rar compression failed with exit code {returncode}: {error_details}"
-            )
-
-        if not rar_file.exists() or rar_file.stat().st_size == 0:
-            raise RuntimeError("rar archive was not created or is empty")
+        if not zip_file.exists() or zip_file.stat().st_size == 0:
+            raise RuntimeError("zip archive was not created or is empty")
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-        logger.info("BACKUP ARCHIVE CREATED: %s", rar_file)
+        logger.info("BACKUP ARCHIVE CREATED: %s", zip_file)
 
-        rar_size = rar_file.stat().st_size if rar_file.exists() else 0
-        checksum = calculate_checksum(rar_file)
+        zip_size = zip_file.stat().st_size if zip_file.exists() else 0
+        checksum = calculate_checksum(zip_file)
 
         if is_sync_cloud and is_gdrive_enabled():
             try:
                 cloud_folder = raw_cloud_dest or "/backups"
-                upload_file_to_gdrive(rar_file, logger, folder_path=cloud_folder)
+                upload_file_to_gdrive(zip_file, logger, folder_path=cloud_folder)
                 if not keep_local:
-                    rar_file.unlink(missing_ok=True)
+                    zip_file.unlink(missing_ok=True)
                     if snapshot_dir.exists():
                         shutil.rmtree(snapshot_dir, ignore_errors=True)
                     cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
@@ -517,7 +386,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
             except Exception:
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
         elif not keep_local:
-            rar_file.unlink(missing_ok=True)
+            zip_file.unlink(missing_ok=True)
             if snapshot_dir.exists():
                 shutil.rmtree(snapshot_dir, ignore_errors=True)
             cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
@@ -530,10 +399,10 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         if schedule_id is not None:
             report_payload = {
                 "schedule_id": schedule_id,
-                "file_name": rar_filename,
+                "file_name": zip_filename,
                 "file_path": local_file_path,
                 "cloud_file_path": cloud_file_path,
-                "file_size": rar_size,
+                "file_size": zip_size,
                 "checksum": checksum,
                 "type": backup_type,
                 "started_at": started_at,
@@ -557,8 +426,8 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
     except Exception as err:
         logger.exception("BACKUP FAILED: %s", name)
         shutil.rmtree(snapshot_dir, ignore_errors=True)
-        if rar_file.exists():
-            rar_file.unlink(missing_ok=True)
+        if zip_file.exists():
+            zip_file.unlink(missing_ok=True)
         cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
 
         end_time = time.time()
@@ -568,7 +437,7 @@ def run_single_backup(schedule: dict, rar_password: str, logger) -> bool:
         if schedule_id is not None:
             report_payload = {
                 "schedule_id": schedule_id,
-                "file_name": rar_filename,
+                "file_name": zip_filename,
                 "file_path": local_file_path,
                 "cloud_file_path": cloud_file_path,
                 "file_size": 0,
@@ -608,9 +477,9 @@ def run_backup(config=None, logger=None):
         return
 
     try:
-        rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
-        if not rar_password:
-            raise ValueError("RAR_PASSWORD is not set in environment")
+        zip_password = os.environ.get("ZIP_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
+        if not zip_password:
+            raise ValueError("ZIP_PASSWORD is not set in environment")
 
         schedules = fetch_backup_schedules(logger=logger)
         if not schedules:
@@ -628,7 +497,7 @@ def run_backup(config=None, logger=None):
         fail_count = 0
 
         for schedule in enabled_schedules:
-            success = run_single_backup(schedule, rar_password, logger)
+            success = run_single_backup(schedule, zip_password, logger)
             if success:
                 success_count += 1
             else:

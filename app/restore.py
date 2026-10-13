@@ -1,19 +1,19 @@
 import os
 from pathlib import Path
-import pty
-import re
-import subprocess
-import sys
-import time
 
+from .archive import (
+    ArchiveCorruptedError,
+    ArchiveError,
+    ArchivePasswordError,
+    ArchiveWriteError,
+    extract_encrypted_zip,
+)
 from .gdrive import (
     download_cloud_file,
     find_cloud_backup,
     get_cloud_backup_names,
     is_gdrive_enabled,
 )
-from .logger import log_milestone
-from .utils import format_speed
 
 
 class RestoreError(Exception):
@@ -24,129 +24,23 @@ class IncorrectPasswordError(RestoreError):
     pass
 
 
-def execute_rar_extract(rar_file: Path, recovery_dir: Path, rar_password: str, logger):
-    recovery_dir.mkdir(parents=True, exist_ok=True)
-    target_path = str(recovery_dir).rstrip("/") + "/"
-    command = [
-        "rar",
-        "x",
-        "-y",
-        "-ol",
-        "-idc",
-        "-idd",
-        "-idn",
-        f"-hp{rar_password}",
-        str(rar_file),
-        target_path,
-    ]
-
-    master_fd, slave_fd = pty.openpty()
+def execute_zip_extract(zip_file: Path, recovery_dir: Path, zip_password: str, logger):
     try:
-        proc = subprocess.Popen(
-            command,
-            cwd=str(recovery_dir),
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-    except Exception:
-        os.close(slave_fd)
-        os.close(master_fd)
-        raise
-
-    os.close(slave_fd)
-    try:
-        output_chunks = []
-        last_percent = -1
-        last_milestone = 0
-        stream_buffer = ""
-        is_tty = sys.stdout.isatty()
-        start_time = time.time()
-        last_sample_time = start_time
-        last_sample_bytes = 0.0
-        last_speed_str = "0 B/s"
-        total_bytes = rar_file.stat().st_size if rar_file.exists() else 0
-
-        while True:
-            try:
-                chunk = os.read(master_fd, 1024)
-                if not chunk:
-                    break
-                text = chunk.decode("utf-8", errors="ignore")
-                output_chunks.append(text)
-                stream_buffer += text
-
-                matches = re.findall(r"(\d{1,3})%", stream_buffer)
-                if matches:
-                    val = int(matches[-1])
-                    if 0 <= val <= 100 and val != last_percent:
-                        last_percent = val
-
-                        if total_bytes > 0:
-                            current_processed = total_bytes * (val / 100.0)
-                            now = time.time()
-                            delta_time = now - last_sample_time
-                            if delta_time >= 0.5:
-                                speed = (current_processed - last_sample_bytes) / delta_time
-                                last_speed_str = format_speed(speed)
-                                last_sample_time = now
-                                last_sample_bytes = current_processed
-                            elif last_speed_str == "0 B/s":
-                                elapsed = now - start_time
-                                if elapsed > 0:
-                                    last_speed_str = format_speed(current_processed / elapsed)
-                            speed_display = f" ({last_speed_str})"
-                        else:
-                            speed_display = ""
-
-                        if is_tty:
-                            sys.stdout.write(f"\rExtracting snapshot: {val}%{speed_display}\033[K")
-                            sys.stdout.flush()
-
-                        milestone = (val // 25) * 25
-                        if milestone > 0 and milestone > last_milestone:
-                            last_milestone = milestone
-                            log_milestone(logger, f"Extracting snapshot: {milestone}%{speed_display}", is_tty)
-
-                stream_buffer = stream_buffer[-32:]
-            except OSError:
-                break
-
-        if is_tty and last_percent != -1:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-        total_duration = time.time() - start_time
-        avg_speed = total_bytes / total_duration if total_duration > 0 and total_bytes > 0 else 0
-        final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
-
-        if last_percent != -1 and last_milestone < 100:
-            log_milestone(logger, f"Extracting snapshot: 100%{final_speed_str}", is_tty)
-            last_milestone = 100
-
-        proc.wait()
-        full_output = "".join(output_chunks)
-        if proc.returncode not in (0, 1):
-            error_details = full_output.strip()
-            lower_err = error_details.lower()
-            if proc.returncode == 11 or "incorrect password" in lower_err or "wrong password" in lower_err:
-                raise IncorrectPasswordError(
-                    f"Incorrect password for '{rar_file.name}'. Please check RAR_PASSWORD in your .env file."
-                )
-            if proc.returncode == 3 or "crc error" in lower_err or "checksum error" in lower_err:
-                raise RestoreError(
-                    f"Archive '{rar_file.name}' is damaged or corrupted (CRC error)."
-                )
-            if proc.returncode == 5 or "write error" in lower_err:
-                raise RestoreError(
-                    f"Disk write error while extracting '{rar_file.name}'. Please check disk space and permissions."
-                )
-            raise RestoreError(
-                f"rar extraction failed with exit code {proc.returncode}: {error_details}"
-            )
-        return proc.returncode, full_output
-    finally:
-        os.close(master_fd)
+        extract_encrypted_zip(zip_file, recovery_dir, zip_password, logger)
+    except ArchivePasswordError as err:
+        raise IncorrectPasswordError(
+            f"Incorrect password for '{zip_file.name}'. Please check ZIP_PASSWORD in your .env file."
+        ) from err
+    except ArchiveCorruptedError as err:
+        raise RestoreError(
+            f"Archive '{zip_file.name}' is damaged or corrupted: {err}"
+        ) from err
+    except ArchiveWriteError as err:
+        raise RestoreError(
+            f"Disk write error while extracting '{zip_file.name}'. Please check disk space and permissions. ({err})"
+        ) from err
+    except ArchiveError as err:
+        raise RestoreError(f"zip extraction failed: {err}") from err
 
 
 def get_recovery_destination(config: dict) -> Path:
@@ -162,7 +56,7 @@ def get_recovery_destination(config: dict) -> Path:
 def prompt_for_backup_file(destination: Path, logger) -> str:
     local_files = [
         item.name for item in destination.iterdir()
-        if item.is_file() and item.name.endswith(".rar")
+        if item.is_file() and item.name.endswith(".zip")
     ]
     local_files.sort(reverse=True)
 
@@ -205,10 +99,10 @@ def prompt_for_backup_file(destination: Path, logger) -> str:
 
 
 def run_restore(config: dict, logger, filename: str | None = None):
-    rar_password = os.environ.get("RAR_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
-    if not rar_password:
-        logger.error("RESTORE FAILED: RAR_PASSWORD is not set in environment.")
-        raise RestoreError("RAR_PASSWORD is not set in environment")
+    zip_password = os.environ.get("ZIP_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
+    if not zip_password:
+        logger.error("RESTORE FAILED: ZIP_PASSWORD is not set in environment.")
+        raise RestoreError("ZIP_PASSWORD is not set in environment")
 
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
@@ -221,8 +115,8 @@ def run_restore(config: dict, logger, filename: str | None = None):
         raise RestoreError("No backup filename provided")
 
     filename = filename.strip()
-    if not filename.endswith(".rar"):
-        filename += ".rar"
+    if not filename.endswith(".zip"):
+        filename += ".zip"
 
     logger.info("========================================")
     logger.info("RESTORE INITIATED: %s", filename)
@@ -259,7 +153,7 @@ def run_restore(config: dict, logger, filename: str | None = None):
         recovery_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("Extracting %s to %s", target_file, recovery_dir)
-        execute_rar_extract(target_file, recovery_dir, rar_password, logger)
+        execute_zip_extract(target_file, recovery_dir, zip_password, logger)
         logger.info("RESTORE SUCCESS: Extracted to %s", recovery_dir)
 
     except RestoreError as err:

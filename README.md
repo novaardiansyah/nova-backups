@@ -2,7 +2,7 @@
 
 Hi Future Developer,
 
-Welcome to **Nova Backups Manager**! This project is a containerized, automated backup and disaster-recovery solution designed to perform multi-source directory syncing, generate password-encrypted RAR snapshot archives, sync backups to Google Drive cloud storage, and manage local/cloud retention lifecycles.
+Welcome to **Nova Backups Manager**! This project is a containerized, automated backup and disaster-recovery solution designed to perform multi-source directory syncing, generate password-encrypted ZIP snapshot archives, sync backups to Google Drive cloud storage, and manage local/cloud retention lifecycles.
 
 > **Note:** This repository operates autonomously inside Docker, scheduling daily snapshots across multiple configured times, streaming compression and upload milestones, and providing an interactive restoration interface for rapid disaster recovery.
 
@@ -10,7 +10,7 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 
 - [Python 3.10+](https://www.python.org/) - Core backend application logic
 - [Docker & Docker Compose](https://www.docker.com/) - Containerized deployment and isolated execution
-- [RAR & UnRAR](https://www.rarlab.com/) - Password-protected encrypted snapshot compression (`-hp`)
+- [pyzipper](https://github.com/danifus/pyzipper) - AES-256 password-encrypted ZIP snapshot compression
 - [rsync](https://rsync.samba.org/) - Fast, incremental multi-source directory synchronization
 - [Google Drive API v3](https://developers.google.com/drive) - Resumable chunked cloud storage integration
 - [Requests](https://requests.readthedocs.io/) - HTTP library for API communication and Google Drive API
@@ -18,7 +18,7 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 ## Core Features & Workflow
 
 - **Multi-Source Aggregation**: Consolidate disparate project folders, host paths, or volumes into structured snapshot directories using `rsync`.
-- **Encrypted Snapshot Archives**: Secure all backup archives with strong RAR header and content encryption (`-hp`), preventing unauthorized inspection.
+- **Encrypted Snapshot Archives**: Secure all backup archives with AES-256 ZIP encryption, preventing unauthorized access to file contents.
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
 - **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
 - **Resilient Error Handling**: Clean, user-friendly error diagnostics for password errors, archive corruption, and missing environments without noisy tracebacks.
@@ -57,7 +57,7 @@ OAUTH_REFRESH_TOKEN="your_google_refresh_token"
 # Docker & Backup Storage
 BACKUP_DESTINATION="/home/user/Backups"
 RECOVERY_DESTINATION="/home/user/Backups/Recovery"
-RAR_PASSWORD="your_secure_encryption_password"
+ZIP_PASSWORD="your_secure_encryption_password"
 
 # API Service
 API_URL="https://your-domain.com/api/system-backup"
@@ -87,7 +87,7 @@ make docker-backup
 make docker-restore
 
 # Restore specific backup file
-make docker-restore FILE=backup-20261003-222538.rar
+make docker-restore FILE=backup-20261003-222538.zip
 ```
 
 ## Related Repositories

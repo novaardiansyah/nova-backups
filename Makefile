@@ -11,7 +11,8 @@ up:
 	
 	@echo "[INFO] Docker Build is starting..."
 	@echo "[INFO] Pulling latest changes from GitHub..."
-	# @git pull origin main
+	@git restore .
+	@git pull origin main
 
 	@make down
 

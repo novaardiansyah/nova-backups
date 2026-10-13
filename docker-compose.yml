@@ -11,7 +11,7 @@ services:
 
     environment:
       TZ: Asia/Jakarta
-      RAR_PASSWORD: ${RAR_PASSWORD}
+      ZIP_PASSWORD: ${ZIP_PASSWORD}
 
     user: "0:0"
 

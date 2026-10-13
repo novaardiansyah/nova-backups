@@ -128,7 +128,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
     init_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": "application/x-rar-compressed",
+        "X-Upload-Content-Type": "application/zip",
         "X-Upload-Content-Length": str(file_size),
     }
 
