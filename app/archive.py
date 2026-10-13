@@ -95,8 +95,8 @@ def _zip_date_time(timestamp: float) -> tuple:
   return date_time
 
 
-def _build_zip_info(arcname: str, st: os.stat_result) -> pyzipper.ZipInfo:
-  zinfo = pyzipper.ZipInfo(arcname, _zip_date_time(st.st_mtime))
+def _build_zip_info(arcname: str, st: os.stat_result) -> pyzipper.AESZipInfo:
+  zinfo = pyzipper.AESZipInfo(arcname, _zip_date_time(st.st_mtime))
   zinfo.create_system = 3
   zinfo.external_attr = (st.st_mode & 0xFFFF) << 16
   return zinfo
