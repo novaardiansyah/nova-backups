@@ -35,6 +35,5 @@ AGENTS.md
 Api
 obsidian
 
-backups/*.zip
-backups/*.sql
-backups/*.bak
+/backups/*
+!/backups/.gitkeep
