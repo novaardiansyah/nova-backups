@@ -37,3 +37,6 @@ obsidian
 
 /backups/*
 !/backups/.gitkeep
+!/backups/recovery/
+/backups/recovery/*
+!/backups/recovery/.gitkeep
