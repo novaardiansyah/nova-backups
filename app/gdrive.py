@@ -5,7 +5,7 @@ import time
 import requests
 
 from .logger import log_milestone
-from .utils import format_speed
+from .utils import format_size, format_speed
 
 
 def is_gdrive_enabled() -> bool:
@@ -154,6 +154,7 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
         raise RuntimeError("Google Drive did not return a resumable upload Location header")
 
     chunk_size = 5 * 1024 * 1024
+    milestone_step = 50 * 1024 * 1024
     uploaded = 0
     last_percent = -1
     last_milestone = 0
@@ -206,10 +207,10 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
             if val != last_percent:
                 last_percent = val
 
-            milestone = (val // 25) * 25
+            milestone = (uploaded // milestone_step) * milestone_step
             if milestone > 0 and milestone > last_milestone:
                 last_milestone = milestone
-                log_milestone(logger, f"Uploading to Google Drive: {milestone}% ({last_speed_str})", is_tty)
+                log_milestone(logger, f"Uploading to Google Drive: {format_size(milestone)} ({last_speed_str})", is_tty)
 
     if is_tty and last_percent != -1:
         sys.stdout.write("\n")
@@ -219,9 +220,9 @@ def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = Non
     avg_speed = file_size / total_duration if total_duration > 0 else 0
     final_speed_str = format_speed(avg_speed)
 
-    if last_percent != -1 and last_milestone < 100:
-        log_milestone(logger, f"Uploading to Google Drive: 100% ({final_speed_str})", is_tty)
-        last_milestone = 100
+    if uploaded > 0 and last_milestone < uploaded:
+        log_milestone(logger, f"Uploading to Google Drive: {format_size(uploaded)} ({final_speed_str})", is_tty)
+        last_milestone = uploaded
 
     logger.info("UPLOAD TO GOOGLE DRIVE SUCCESS: %s", file_name)
 

@@ -9,7 +9,7 @@ import pyzipper
 from pyzipper.zipfile_aes import AESZipInfo
 
 from .logger import log_milestone
-from .utils import format_speed
+from .utils import format_size, format_speed
 
 CHUNK_SIZE = 1024 * 1024
 
@@ -41,15 +41,12 @@ class ProgressReporter:
     self.last_sample_bytes = 0
     self.last_speed_str = "0 B/s"
     self.last_percent = -1
+    self.milestone_step = 50 * 1024 * 1024
     self.last_milestone = 0
 
   def update(self, processed: int):
     if self.total_bytes <= 0:
       return
-    val = min(100, int(processed * 100 / self.total_bytes))
-    if val == self.last_percent:
-      return
-    self.last_percent = val
 
     now = time.time()
     delta_time = now - self.last_sample_time
@@ -64,14 +61,16 @@ class ProgressReporter:
         self.last_speed_str = format_speed(processed / elapsed)
     speed_display = f" ({self.last_speed_str})"
 
-    if self.is_tty:
+    val = min(100, int(processed * 100 / self.total_bytes))
+    if self.is_tty and val != self.last_percent:
+      self.last_percent = val
       sys.stdout.write(f"\r{self.label}: {val}%{speed_display}\033[K")
       sys.stdout.flush()
 
-    milestone = (val // 25) * 25
+    milestone = (processed // self.milestone_step) * self.milestone_step
     if milestone > 0 and milestone > self.last_milestone:
       self.last_milestone = milestone
-      log_milestone(self.logger, f"{self.label}: {milestone}%{speed_display}", self.is_tty)
+      log_milestone(self.logger, f"{self.label}: {format_size(milestone)}{speed_display}", self.is_tty)
 
   def finish(self):
     if self.is_tty and self.last_percent != -1:
@@ -82,9 +81,9 @@ class ProgressReporter:
     avg_speed = self.total_bytes / total_duration if total_duration > 0 and self.total_bytes > 0 else 0
     final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
 
-    if self.last_milestone < 100:
-      log_milestone(self.logger, f"{self.label}: 100%{final_speed_str}", self.is_tty)
-      self.last_milestone = 100
+    if self.total_bytes > 0 and self.last_milestone < self.total_bytes:
+      log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)}{final_speed_str}", self.is_tty)
+      self.last_milestone = self.total_bytes
 
 
 def _zip_date_time(timestamp: float) -> tuple:
