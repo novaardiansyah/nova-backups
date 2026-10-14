@@ -1,9 +1,8 @@
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import stat
 import sys
 import time
-import zlib
 
 import pyzipper
 from pyzipper.zipfile_aes import AESZipInfo
@@ -12,22 +11,6 @@ from .logger import log_milestone
 from .utils import format_size, format_speed
 
 CHUNK_SIZE = 1024 * 1024
-
-
-class ArchiveError(Exception):
-  pass
-
-
-class ArchivePasswordError(ArchiveError):
-  pass
-
-
-class ArchiveCorruptedError(ArchiveError):
-  pass
-
-
-class ArchiveWriteError(ArchiveError):
-  pass
 
 
 class ProgressReporter:
@@ -165,88 +148,3 @@ def create_encrypted_zip(source_dir: Path, archive_path: Path, password: str, lo
 
   reporter.finish()
   return total_bytes
-
-
-def _safe_target(recovery_dir: Path, name: str) -> Path | None:
-  parts = [p for p in PurePosixPath(name.replace("\\", "/")).parts if p not in ("", ".", "/")]
-  if not parts or any(p == ".." for p in parts):
-    return None
-  target = recovery_dir.joinpath(*parts)
-  try:
-    target.resolve(strict=False).relative_to(recovery_dir.resolve())
-  except ValueError:
-    return None
-  return target
-
-
-def _remove_existing(target: Path):
-  if target.is_symlink() or target.is_file():
-    target.unlink()
-
-
-def _apply_metadata(target: Path, info: pyzipper.ZipInfo):
-  mode = (info.external_attr >> 16) & 0o7777
-  try:
-    if mode:
-      os.chmod(target, mode)
-    mtime = time.mktime(info.date_time + (0, 0, -1))
-    os.utime(target, (mtime, mtime))
-  except (OSError, OverflowError, ValueError):
-    pass
-
-
-def extract_encrypted_zip(archive_path: Path, recovery_dir: Path, password: str, logger):
-  recovery_dir.mkdir(parents=True, exist_ok=True)
-
-  try:
-    with pyzipper.AESZipFile(archive_path, "r") as zf:
-      zf.setpassword(password.encode("utf-8"))
-      infos = zf.infolist()
-      total_bytes = sum(i.file_size for i in infos if not i.is_dir())
-      reporter = ProgressReporter(logger, "Extracting snapshot", total_bytes)
-      processed = 0
-      directories = []
-
-      for info in infos:
-        target = _safe_target(recovery_dir, info.filename)
-        if target is None:
-          logger.warning("Skipping unsafe archive entry: %s", info.filename)
-          continue
-
-        file_mode = info.external_attr >> 16
-
-        if info.is_dir():
-          target.mkdir(parents=True, exist_ok=True)
-          directories.append((target, info))
-          continue
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        if stat.S_ISLNK(file_mode):
-          link_target = zf.read(info).decode("utf-8")
-          _remove_existing(target)
-          os.symlink(link_target, target)
-          processed += info.file_size
-          reporter.update(processed)
-          continue
-
-        _remove_existing(target)
-        with zf.open(info, "r") as src, open(target, "wb") as dst:
-          while chunk := src.read(CHUNK_SIZE):
-            dst.write(chunk)
-            processed += len(chunk)
-            reporter.update(processed)
-        _apply_metadata(target, info)
-
-      for target, info in reversed(directories):
-        _apply_metadata(target, info)
-
-      reporter.finish()
-  except RuntimeError as err:
-    if "password" in str(err).lower():
-      raise ArchivePasswordError(str(err)) from err
-    raise ArchiveError(str(err)) from err
-  except (pyzipper.BadZipFile, zlib.error, EOFError) as err:
-    raise ArchiveCorruptedError(str(err)) from err
-  except OSError as err:
-    raise ArchiveWriteError(str(err)) from err

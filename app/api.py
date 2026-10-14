@@ -232,42 +232,6 @@ def fetch_backup_schedules(
     return schedules
 
 
-def run_schedules(logger=None) -> list[dict]:
-    if logger is None:
-        logger = setup_logger()
-
-    try:
-        schedules = fetch_backup_schedules(logger=logger)
-        if not schedules:
-            logger.info("No backup schedules found for this server.")
-            return []
-
-        for idx, item in enumerate(schedules, 1):
-            name = item.get("name", "Unnamed")
-            backup_type = item.get("type", "files")
-            source = item.get("source_path", "-")
-            dest = item.get("local_destination_path", "-")
-            cloud = item.get("cloud_destination_path", "-")
-            enabled = item.get("is_enabled", False)
-            exclude = item.get("exclude", "-")
-
-            logger.info(
-                "[%d] %s (Type: %s) | Enabled: %s | Source: %s | Local: %s | Cloud: %s | Exclude: %s",
-                idx,
-                name,
-                backup_type,
-                enabled,
-                source,
-                dest,
-                cloud,
-                exclude,
-            )
-        return schedules
-    except Exception as err:
-        logger.exception("Failed to fetch backup schedules: %s", err)
-        raise
-
-
 def send_backup_report(
     payload: dict,
     api_url: str | None = None,

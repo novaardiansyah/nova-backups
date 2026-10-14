@@ -4,7 +4,7 @@ Hi Future Developer,
 
 Welcome to **Nova Backups Manager**! This project is a containerized, automated backup and disaster-recovery solution designed to perform multi-source directory syncing, generate password-encrypted ZIP snapshot archives, sync backups to Google Drive cloud storage, and manage local/cloud retention lifecycles.
 
-> **Note:** This repository operates autonomously inside Docker, scheduling daily snapshots across multiple configured times, streaming compression and upload milestones, and providing an interactive restoration interface for rapid disaster recovery.
+> **Note:** This repository operates autonomously inside Docker, polling the central API at regular intervals (`BACKUP_INTERVAL`), streaming compression and cloud sync milestones directly to logs, and reporting execution status.
 
 ## Dazzling Tech Stack
 
@@ -20,8 +20,8 @@ Welcome to **Nova Backups Manager**! This project is a containerized, automated 
 - **Multi-Source Aggregation**: Consolidate disparate project folders, host paths, or volumes into structured snapshot directories using `rsync`.
 - **Encrypted Snapshot Archives**: Secure all backup archives with AES-256 ZIP encryption, preventing unauthorized access to file contents.
 - **Resumable Google Drive Sync**: Seamlessly upload snapshot archives to Google Drive folders with OAuth2 token auto-refresh and chunked uploading.
-- **Interactive & Cloud-Aware Restore**: Easily restore any snapshot. If a backup is not present locally, it is automatically retrieved from Google Drive before extraction.
-- **Resilient Error Handling**: Clean, user-friendly error diagnostics for password errors, archive corruption, and missing environments without noisy tracebacks.
+- **Autonomous Polling Scheduler**: Periodically queries the central management API for backup schedules and automatically executes tasks.
+- **Resilient Error Handling**: Clean, user-friendly error diagnostics and automated execution reporting back to the API.
 
 ## Quick Start & Setup
 
@@ -51,7 +51,6 @@ BACKUP_INTERVAL="5m"
 
 # Docker & Backup Storage
 BACKUP_DESTINATION="/home/user/Backups"
-RECOVERY_DESTINATION="/home/user/Backups/Recovery"
 ZIP_PASSWORD="your_secure_encryption_password"
 
 # API Service
@@ -67,22 +66,13 @@ The project includes pre-configured `Makefile` commands for common operations:
 
 ```bash
 # Build and start container with autonomous scheduler in background
-make docker-build
+make up
+
+# Stop and remove container
+make down
 
 # Follow live container logs and scheduler execution
 make docker-logs
-
-# Fetch backup schedules from API
-make docker-schedules
-
-# Trigger manual backup immediately
-make docker-backup
-
-# Restore backup interactively
-make docker-restore
-
-# Restore specific backup file
-make docker-restore FILE=backup-20261003-222538.zip
 ```
 
 ## Related Repositories

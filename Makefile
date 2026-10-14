@@ -1,11 +1,3 @@
-ifeq ($(filter $(firstword $(MAKECMDGOALS)),docker-restore),$(firstword $(MAKECMDGOALS)))
-  CMD_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-  ifneq ($(CMD_ARGS),)
-    FILE ?= $(CMD_ARGS)
-    $(eval $(CMD_ARGS):;@:)
-  endif
-endif
-
 up:
 	clear
 	
@@ -34,18 +26,6 @@ down:
 docker-logs:
 	clear
 	docker compose logs -f
-
-backup:
-	clear
-	docker compose exec backup python -m app.main backup
-
-restore:
-	clear
-	docker compose exec backup python -m app.main restore $(FILE)
-
-schedules:
-	clear
-	docker compose exec backup python -m app.main schedules
 
 permissions:
 	@for f in .env .env.local .env.production .env.staging AGENTS.md Makefile; do \

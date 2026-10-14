@@ -23,7 +23,6 @@ services:
       - /var:/host/var
       - ./logs:/app/logs
       - ${BACKUP_DESTINATION}:/backup
-      - ${RECOVERY_DESTINATION}:/recovery
 
     networks:
       - mysql_network
