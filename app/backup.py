@@ -243,6 +243,7 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
     name = schedule.get("name", "Unnamed")
     backup_type = schedule.get("type", "files")
     storage_id = schedule.get("storage_id")
+    provider_id = schedule.get("provider_id")
     server_id = schedule.get("server_id")
     raw_source = schedule.get("source_path", "")
     raw_local_dest = schedule.get("local_destination_path", "")
@@ -251,6 +252,14 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
     is_sync_cloud = bool(schedule.get("is_sync_cloud", False))
     keep_local = bool(schedule.get("keep_local_backup", False))
     exclude_raw = schedule.get("exclude", "")
+    keys = schedule.get("keys")
+
+    gdrive_enabled = False
+    if provider_id is not None:
+        if provider_id == 1 and is_gdrive_enabled(keys):
+            gdrive_enabled = True
+    elif is_gdrive_enabled(keys):
+        gdrive_enabled = True
 
     if not filename_base:
         filename_base = datetime.now(tz).strftime("backup-%Y%m%d-%H%M%S")
@@ -270,7 +279,7 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
 
     local_file_path = f"{raw_local_dest.rstrip('/')}/{zip_filename}" if raw_local_dest else str(zip_file)
     cloud_dest = raw_cloud_dest or "/backups"
-    cloud_file_path = f"{cloud_dest.rstrip('/')}/{zip_filename}" if (is_sync_cloud and is_gdrive_enabled()) else None
+    cloud_file_path = f"{cloud_dest.rstrip('/')}/{zip_filename}" if (is_sync_cloud and gdrive_enabled) else None
 
     logger.info("========================================")
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
@@ -373,10 +382,10 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
         zip_size = zip_file.stat().st_size if zip_file.exists() else 0
         checksum = calculate_checksum(zip_file)
 
-        if is_sync_cloud and is_gdrive_enabled():
+        if is_sync_cloud and gdrive_enabled:
             try:
                 cloud_folder = raw_cloud_dest or "/backups"
-                upload_file_to_gdrive(zip_file, logger, folder_path=cloud_folder)
+                upload_file_to_gdrive(zip_file, logger, folder_path=cloud_folder, keys=keys)
                 if not keep_local:
                     zip_file.unlink(missing_ok=True)
                     if snapshot_dir.exists():
@@ -385,6 +394,7 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
                     logger.info("Removed local archive and directories per keep_local_backup=False")
             except Exception:
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
+                raise
         elif not keep_local:
             zip_file.unlink(missing_ok=True)
             if snapshot_dir.exists():

@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from .api import fetch_backup_schedules
 from .archive import (
     ArchiveCorruptedError,
     ArchiveError,
@@ -53,7 +54,7 @@ def get_recovery_destination(config: dict) -> Path:
     return destination / "Recovery"
 
 
-def prompt_for_backup_file(destination: Path, logger) -> str:
+def prompt_for_backup_file(destination: Path, logger, gdrive_keys_list: list[dict] | None = None) -> str:
     local_files = [
         item.name for item in destination.iterdir()
         if item.is_file() and item.name.endswith(".zip")
@@ -61,12 +62,17 @@ def prompt_for_backup_file(destination: Path, logger) -> str:
     local_files.sort(reverse=True)
 
     cloud_files = []
-    if is_gdrive_enabled():
-        try:
-            cloud_files = get_cloud_backup_names()
-            cloud_files.sort(reverse=True)
-        except Exception:
-            logger.warning("Could not list Google Drive files for selection")
+    keys_to_check = gdrive_keys_list if gdrive_keys_list is not None else ([{}] if is_gdrive_enabled() else [])
+    for k in keys_to_check:
+        if is_gdrive_enabled(k):
+            try:
+                names = get_cloud_backup_names(keys=k)
+                for name in names:
+                    if name not in cloud_files:
+                        cloud_files.append(name)
+            except Exception:
+                logger.warning("Could not list Google Drive files for selection")
+    cloud_files.sort(reverse=True)
 
     print("\n--- Available Backups ---")
     if local_files:
@@ -107,8 +113,24 @@ def run_restore(config: dict, logger, filename: str | None = None):
     backup_config = config.get("backup", {})
     destination = Path(backup_config.get("destination", "/backup"))
 
+    gdrive_keys_list = []
+    try:
+        schedules = fetch_backup_schedules(include_disabled=True, logger=logger)
+        for s in schedules:
+            provider_id = s.get("provider_id")
+            if provider_id is not None and provider_id != 1:
+                continue
+            k = s.get("keys")
+            if is_gdrive_enabled(k) and k not in gdrive_keys_list:
+                gdrive_keys_list.append(k)
+    except Exception as api_err:
+        logger.warning("Could not retrieve backup schedules from API: %s", api_err)
+
+    if not gdrive_keys_list and is_gdrive_enabled():
+        gdrive_keys_list.append({})
+
     if not filename:
-        filename = prompt_for_backup_file(destination, logger)
+        filename = prompt_for_backup_file(destination, logger, gdrive_keys_list=gdrive_keys_list)
 
     if not filename:
         logger.error("RESTORE FAILED: No backup filename provided. Aborting restore.")
@@ -129,12 +151,23 @@ def run_restore(config: dict, logger, filename: str | None = None):
             target_file = local_path
         else:
             logger.info("Backup '%s' not found locally. Checking Google Drive...", filename)
-            if not is_gdrive_enabled():
+            if not gdrive_keys_list:
                 raise RestoreError(
                     f"Backup file '{filename}' not found locally and Google Drive is not configured."
                 )
 
-            cloud_info = find_cloud_backup(filename)
+            cloud_info = None
+            matched_keys = None
+            for k in gdrive_keys_list:
+                try:
+                    info = find_cloud_backup(filename, keys=k)
+                    if info:
+                        cloud_info = info
+                        matched_keys = k
+                        break
+                except Exception:
+                    continue
+
             if not cloud_info:
                 raise RestoreError(
                     f"Backup file '{filename}' was not found locally or in Google Drive."
@@ -146,6 +179,7 @@ def run_restore(config: dict, logger, filename: str | None = None):
                 local_path,
                 int(cloud_info.get("size", 0)),
                 logger,
+                keys=matched_keys,
             )
             target_file = local_path
 

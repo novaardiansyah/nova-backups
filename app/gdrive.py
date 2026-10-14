@@ -8,20 +8,25 @@ from .logger import log_milestone
 from .utils import format_size, format_speed
 
 
-def is_gdrive_enabled() -> bool:
+def is_gdrive_enabled(keys: dict | None = None) -> bool:
+    if keys and isinstance(keys, dict):
+        client_id = keys.get("oauth_client_id")
+        refresh_token = keys.get("oauth_refresh_token")
+        return bool(client_id and refresh_token)
     client_id = os.environ.get("OAUTH_CLIENT_ID")
     refresh_token = os.environ.get("OAUTH_REFRESH_TOKEN")
     return bool(client_id and refresh_token)
 
 
-def get_access_token() -> str:
-    client_id = os.environ.get("OAUTH_CLIENT_ID")
-    client_secret = os.environ.get("OAUTH_CLIENT_SECRET")
-    refresh_token = os.environ.get("OAUTH_REFRESH_TOKEN")
-    token_uri = os.environ.get("OAUTH_TOKEN_URI", "https://oauth2.googleapis.com/token")
+def get_access_token(keys: dict | None = None) -> str:
+    keys = keys or {}
+    client_id = keys.get("oauth_client_id") or os.environ.get("OAUTH_CLIENT_ID")
+    client_secret = keys.get("oauth_client_secret") or os.environ.get("OAUTH_CLIENT_SECRET")
+    refresh_token = keys.get("oauth_refresh_token") or os.environ.get("OAUTH_REFRESH_TOKEN")
+    token_uri = keys.get("oauth_token_uri") or os.environ.get("OAUTH_TOKEN_URI", "https://oauth2.googleapis.com/token")
 
     if not client_id or not client_secret or not refresh_token:
-        raise ValueError("Missing Google Drive OAuth credentials in environment")
+        raise ValueError("Missing Google Drive OAuth credentials")
 
     data = {
         "client_id": client_id,
@@ -115,8 +120,13 @@ def get_or_create_folder(folder_path: str, access_token: str) -> str:
     return current_parent_id
 
 
-def upload_file_to_gdrive(file_path: Path, logger, folder_path: str | None = None):
-    access_token = get_access_token()
+def upload_file_to_gdrive(
+    file_path: Path,
+    logger,
+    folder_path: str | None = None,
+    keys: dict | None = None,
+):
+    access_token = get_access_token(keys=keys)
     target_folder = folder_path or "/backups"
     folder_id = get_or_create_folder(target_folder, access_token)
 
@@ -285,11 +295,15 @@ def delete_cloud_file(file_id: str, access_token: str):
         )
 
 
-def find_cloud_backup(filename: str, folder_path: str | None = None) -> dict | None:
-    if not is_gdrive_enabled():
+def find_cloud_backup(
+    filename: str,
+    folder_path: str | None = None,
+    keys: dict | None = None,
+) -> dict | None:
+    if not is_gdrive_enabled(keys):
         return None
 
-    access_token = get_access_token()
+    access_token = get_access_token(keys=keys)
     safe_name = filename.replace("'", r"\'")
     if folder_path:
         folder_id = get_or_create_folder(folder_path, access_token)
@@ -330,11 +344,14 @@ def find_cloud_backup(filename: str, folder_path: str | None = None) -> dict | N
     return None
 
 
-def get_cloud_backup_names(folder_path: str | None = None) -> list[str]:
-    if not is_gdrive_enabled():
+def get_cloud_backup_names(
+    folder_path: str | None = None,
+    keys: dict | None = None,
+) -> list[str]:
+    if not is_gdrive_enabled(keys):
         return []
 
-    access_token = get_access_token()
+    access_token = get_access_token(keys=keys)
     if folder_path:
         folder_id = get_or_create_folder(folder_path, access_token)
         files = list_cloud_backups(folder_id, access_token)
@@ -377,8 +394,14 @@ def get_cloud_backup_names(folder_path: str | None = None) -> list[str]:
     return [f.get("name", "") for f in files if f.get("name")]
 
 
-def download_cloud_file(file_id: str, target_path: Path, expected_size: int, logger):
-    access_token = get_access_token()
+def download_cloud_file(
+    file_id: str,
+    target_path: Path,
+    expected_size: int,
+    logger,
+    keys: dict | None = None,
+):
+    access_token = get_access_token(keys=keys)
     headers = {
         "Authorization": f"Bearer {access_token}",
     }
