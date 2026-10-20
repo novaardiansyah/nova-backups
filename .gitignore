@@ -34,6 +34,7 @@ backup/
 AGENTS.md
 Api
 obsidian
+Makefile
 
 /backups/*
 !/backups/.gitkeep
