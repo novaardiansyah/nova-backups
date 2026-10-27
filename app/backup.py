@@ -322,6 +322,7 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
                 command = [
                     "rsync",
                     "-a",
+                    "--no-links",
                     "--human-readable",
                     "--numeric-ids",
                     "--delete",
@@ -336,6 +337,7 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
                 command = [
                     "rsync",
                     "-a",
+                    "--no-links",
                     "--human-readable",
                     "--numeric-ids",
                 ]
