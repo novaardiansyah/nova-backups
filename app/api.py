@@ -264,7 +264,7 @@ def send_backup_report(
         headers["Authorization"] = f"Bearer {token}"
         resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
 
-    if resp.status_code not in (200, 201):
+    if resp.status_code not in (200, 201, 204):
         if logger:
             logger.warning(
                 "Failed to send backup report (%d): %s",
@@ -273,7 +273,11 @@ def send_backup_report(
             )
         return None
 
-    resp_json = resp.json()
+    try:
+        resp_json = resp.json()
+    except Exception:
+        resp_json = {}
+
     if logger:
         logger.info("Backup report successfully recorded by API.")
     return resp_json
@@ -311,7 +315,7 @@ def mark_backup_schedule_started(
         headers["Authorization"] = f"Bearer {token}"
         resp = requests.post(start_url, headers=headers, timeout=120)
 
-    if resp.status_code not in (200, 201):
+    if resp.status_code not in (200, 201, 204):
         if logger:
             logger.warning(
                 "Failed to notify API of schedule start (%d): %s",
@@ -320,7 +324,11 @@ def mark_backup_schedule_started(
             )
         return None
 
-    resp_json = resp.json()
+    try:
+        resp_json = resp.json()
+    except Exception:
+        resp_json = {}
+
     if logger:
         logger.info("Schedule ID %s start timestamp successfully recorded by API.", schedule_id)
     return resp_json

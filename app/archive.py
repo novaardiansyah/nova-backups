@@ -171,9 +171,16 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
     cwd=source_dir.parent,
   )
 
-  if result.returncode != 0:
+  if result.returncode not in (0, 1):
     error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
     raise RuntimeError(f"rar compression failed: {error_msg}")
+
+  if result.returncode == 1 and logger:
+    logger.warning("rar compression completed with non-fatal warnings (exit code 1)")
+
+  if not archive_path.exists() or archive_path.stat().st_size == 0:
+    error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
+    raise RuntimeError(f"rar compression failed to produce archive: {error_msg}")
 
   return archive_path.stat().st_size if archive_path.exists() else 0
 
@@ -204,6 +211,9 @@ def extract_encrypted_rar(archive_path: Path, destination_dir: Path, password: s
     check=False,
   )
 
-  if result.returncode != 0:
+  if result.returncode not in (0, 1):
     error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
     raise RuntimeError(f"rar extraction failed: {error_msg}")
+
+  if result.returncode == 1 and logger:
+    logger.warning("rar extraction completed with non-fatal warnings (exit code 1)")
