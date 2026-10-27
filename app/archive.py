@@ -176,3 +176,34 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
     raise RuntimeError(f"rar compression failed: {error_msg}")
 
   return archive_path.stat().st_size if archive_path.exists() else 0
+
+
+def extract_encrypted_zip(archive_path: Path, destination_dir: Path, password: str, logger) -> None:
+  destination_dir.mkdir(parents=True, exist_ok=True)
+  with pyzipper.AESZipFile(archive_path, "r") as zf:
+    zf.setpassword(password.encode("utf-8"))
+    zf.extractall(destination_dir)
+
+
+def extract_encrypted_rar(archive_path: Path, destination_dir: Path, password: str, logger) -> None:
+  destination_dir.mkdir(parents=True, exist_ok=True)
+  command = [
+    "rar",
+    "x",
+    "-y",
+    f"-hp{password}",
+    str(archive_path.resolve()),
+    f"{str(destination_dir.resolve())}/",
+  ]
+
+  result = subprocess.run(
+    command,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    check=False,
+  )
+
+  if result.returncode != 0:
+    error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
+    raise RuntimeError(f"rar extraction failed: {error_msg}")

@@ -5,11 +5,21 @@ from .scheduler import run_scheduler
 
 
 def main():
-    logger = setup_logger()
+  logger = setup_logger()
+  action = sys.argv[1] if len(sys.argv) > 1 else "scheduler"
+  if action == "test":
+    from .test import run_test
     try:
-        run_scheduler(logger)
-    except Exception:
-        sys.exit(1)
+      ok = run_test(logger)
+      sys.exit(0 if ok else 1)
+    except Exception as err:
+      logger.error("Test failed: %s", err)
+      sys.exit(1)
+
+  try:
+    run_scheduler(logger)
+  except Exception:
+    sys.exit(1)
 
 
 if __name__ == "__main__":
