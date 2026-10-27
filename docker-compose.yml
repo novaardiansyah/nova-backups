@@ -11,7 +11,8 @@ services:
 
     environment:
       TZ: Asia/Jakarta
-      ZIP_PASSWORD: ${ZIP_PASSWORD}
+      ENCRYPT_PASSWORD: ${ENCRYPT_PASSWORD}
+      ENCRYPT_TYPE: ${ENCRYPT_TYPE}
 
     user: "0:0"
 

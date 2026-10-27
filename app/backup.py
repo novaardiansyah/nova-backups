@@ -7,7 +7,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from .api import fetch_backup_schedules, mark_backup_schedule_started, send_backup_report
-from .archive import create_encrypted_zip
+from .archive import create_encrypted_rar, create_encrypted_zip
 from .gdrive import (
     is_gdrive_enabled,
     upload_file_to_gdrive,
@@ -234,7 +234,7 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
     logger.info("SQL Server database backup completed: %s", target_file)
 
 
-def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
+def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, logger) -> bool:
     start_time = time.time()
     tz = ZoneInfo("Asia/Jakarta")
     started_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -264,27 +264,27 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
     if not filename_base:
         filename_base = datetime.now(tz).strftime("backup-%Y%m%d-%H%M%S")
 
-    if filename_base.endswith(".zip"):
-        zip_filename = filename_base
+    if filename_base.endswith(".zip") or filename_base.endswith(".rar"):
         stem = filename_base[:-4]
     else:
-        zip_filename = f"{filename_base}.zip"
         stem = filename_base
+
+    archive_filename = f"{stem}{encrypt_type}"
 
     destination_dir = resolve_destination_path(raw_local_dest)
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot_dir = destination_dir / stem
-    zip_file = destination_dir / zip_filename
+    archive_file = destination_dir / archive_filename
 
-    local_file_path = f"{raw_local_dest.rstrip('/')}/{zip_filename}" if raw_local_dest else str(zip_file)
+    local_file_path = f"{raw_local_dest.rstrip('/')}/{archive_filename}" if raw_local_dest else str(archive_file)
     cloud_dest = raw_cloud_dest or "/backups"
-    cloud_file_path = f"{cloud_dest.rstrip('/')}/{zip_filename}" if (is_sync_cloud and gdrive_enabled) else None
+    cloud_file_path = f"{cloud_dest.rstrip('/')}/{archive_filename}" if (is_sync_cloud and gdrive_enabled) else None
 
     logger.info("========================================")
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
     logger.info("Local Destination: %s", destination_dir)
-    logger.info("Archive Name: %s", zip_filename)
+    logger.info("Archive Name: %s", archive_filename)
 
     if schedule_id is not None:
         try:
@@ -362,32 +362,35 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
                     f"rsync failed for '{source_path}' with exit code {result.returncode}"
                 )
 
-        logger.info("Compressing snapshot to encrypted ZIP: %s", zip_file)
+        logger.info("Compressing snapshot to encrypted %s: %s", encrypt_type.upper().lstrip("."), archive_file)
 
-        if zip_file.exists():
-            zip_file.unlink()
+        if archive_file.exists():
+            archive_file.unlink()
 
         try:
-            create_encrypted_zip(snapshot_dir, zip_file, zip_password, logger)
-        except Exception as zip_err:
-            raise RuntimeError(f"zip compression failed: {zip_err}") from zip_err
+            if encrypt_type == ".rar":
+                create_encrypted_rar(snapshot_dir, archive_file, encrypt_password, logger)
+            else:
+                create_encrypted_zip(snapshot_dir, archive_file, encrypt_password, logger)
+        except Exception as archive_err:
+            raise RuntimeError(f"{encrypt_type.lstrip('.')} compression failed: {archive_err}") from archive_err
 
-        if not zip_file.exists() or zip_file.stat().st_size == 0:
-            raise RuntimeError("zip archive was not created or is empty")
+        if not archive_file.exists() or archive_file.stat().st_size == 0:
+            raise RuntimeError(f"{encrypt_type.lstrip('.')} archive was not created or is empty")
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-        logger.info("BACKUP ARCHIVE CREATED: %s", zip_file)
+        logger.info("BACKUP ARCHIVE CREATED: %s", archive_file)
 
-        zip_size = zip_file.stat().st_size if zip_file.exists() else 0
-        checksum = calculate_checksum(zip_file)
+        archive_size = archive_file.stat().st_size if archive_file.exists() else 0
+        checksum = calculate_checksum(archive_file)
 
         if is_sync_cloud and gdrive_enabled:
             try:
                 cloud_folder = raw_cloud_dest or "/backups"
-                upload_file_to_gdrive(zip_file, logger, folder_path=cloud_folder, keys=keys)
+                upload_file_to_gdrive(archive_file, logger, folder_path=cloud_folder, keys=keys)
                 if not keep_local:
-                    zip_file.unlink(missing_ok=True)
+                    archive_file.unlink(missing_ok=True)
                     if snapshot_dir.exists():
                         shutil.rmtree(snapshot_dir, ignore_errors=True)
                     cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
@@ -396,7 +399,7 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
                 logger.exception("GOOGLE DRIVE UPLOAD FAILED")
                 raise
         elif not keep_local:
-            zip_file.unlink(missing_ok=True)
+            archive_file.unlink(missing_ok=True)
             if snapshot_dir.exists():
                 shutil.rmtree(snapshot_dir, ignore_errors=True)
             cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
@@ -409,10 +412,10 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
         if schedule_id is not None:
             report_payload = {
                 "schedule_id": schedule_id,
-                "file_name": zip_filename,
+                "file_name": archive_filename,
                 "file_path": local_file_path,
                 "cloud_file_path": cloud_file_path,
-                "file_size": zip_size,
+                "file_size": archive_size,
                 "checksum": checksum,
                 "type": backup_type,
                 "started_at": started_at,
@@ -436,8 +439,8 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
     except Exception as err:
         logger.exception("BACKUP FAILED: %s", name)
         shutil.rmtree(snapshot_dir, ignore_errors=True)
-        if zip_file.exists():
-            zip_file.unlink(missing_ok=True)
+        if archive_file.exists():
+            archive_file.unlink(missing_ok=True)
         cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
 
         end_time = time.time()
@@ -447,7 +450,7 @@ def run_single_backup(schedule: dict, zip_password: str, logger) -> bool:
         if schedule_id is not None:
             report_payload = {
                 "schedule_id": schedule_id,
-                "file_name": zip_filename,
+                "file_name": archive_filename,
                 "file_path": local_file_path,
                 "cloud_file_path": cloud_file_path,
                 "file_size": 0,
@@ -487,9 +490,15 @@ def run_backup(config=None, logger=None):
         return
 
     try:
-        zip_password = os.environ.get("ZIP_PASSWORD") or os.environ.get("BACKUP_PASSWORD")
-        if not zip_password:
-            raise ValueError("ZIP_PASSWORD is not set in environment")
+        encrypt_password = os.environ.get("ENCRYPT_PASSWORD")
+        if not encrypt_password:
+            raise ValueError("ENCRYPT_PASSWORD is not set in environment")
+
+        encrypt_type = (os.environ.get("ENCRYPT_TYPE") or ".zip").strip().lower()
+        if not encrypt_type.startswith("."):
+            encrypt_type = f".{encrypt_type}"
+        if encrypt_type not in (".zip", ".rar"):
+            raise ValueError(f"Unsupported ENCRYPT_TYPE '{encrypt_type}'. Must be '.zip' or '.rar'")
 
         schedules = fetch_backup_schedules(logger=logger)
         if not schedules:
@@ -507,7 +516,7 @@ def run_backup(config=None, logger=None):
         fail_count = 0
 
         for schedule in enabled_schedules:
-            success = run_single_backup(schedule, zip_password, logger)
+            success = run_single_backup(schedule, encrypt_password, encrypt_type, logger)
             if success:
                 success_count += 1
             else:

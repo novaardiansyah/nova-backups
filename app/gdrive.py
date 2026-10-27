@@ -135,10 +135,12 @@ def upload_file_to_gdrive(
 
     logger.info("Uploading snapshot to Google Drive: %s -> %s", file_name, target_folder)
 
+    upload_content_type = "application/x-rar-compressed" if file_name.endswith(".rar") else "application/zip"
+
     init_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": "application/zip",
+        "X-Upload-Content-Type": upload_content_type,
         "X-Upload-Content-Length": str(file_size),
     }
 

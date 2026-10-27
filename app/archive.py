@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import time
 
@@ -148,3 +149,30 @@ def create_encrypted_zip(source_dir: Path, archive_path: Path, password: str, lo
 
   reporter.finish()
   return total_bytes
+
+
+def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, logger) -> int:
+  archive_target = archive_path.name if archive_path.parent == source_dir.parent else str(archive_path.resolve())
+  command = [
+    "rar",
+    "a",
+    "-r",
+    f"-hp{password}",
+    archive_target,
+    source_dir.name,
+  ]
+
+  result = subprocess.run(
+    command,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    check=False,
+    cwd=source_dir.parent,
+  )
+
+  if result.returncode != 0:
+    error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
+    raise RuntimeError(f"rar compression failed: {error_msg}")
+
+  return archive_path.stat().st_size if archive_path.exists() else 0

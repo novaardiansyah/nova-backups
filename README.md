@@ -51,7 +51,8 @@ BACKUP_INTERVAL="5m"
 
 # Docker & Backup Storage
 BACKUP_DESTINATION="/home/user/Backups"
-ZIP_PASSWORD="your_secure_encryption_password"
+ENCRYPT_PASSWORD="your_secure_encryption_password"
+ENCRYPT_TYPE=".rar"
 
 # API Service
 API_URL="https://your-domain.com/api/system-backup"
