@@ -9,7 +9,7 @@ import pyzipper
 from pyzipper.zipfile_aes import AESZipInfo
 
 from .logger import log_milestone
-from .utils import format_size, format_speed
+from .utils import format_size, format_speed, get_env_int
 
 CHUNK_SIZE = 1024 * 1024
 
@@ -152,6 +152,7 @@ def create_encrypted_zip(source_dir: Path, archive_path: Path, password: str, lo
 
 
 def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, logger) -> int:
+  rar_threads = max(1, get_env_int("RAR_THREADS", 1))
   archive_target = archive_path.name if archive_path.parent == source_dir.parent else str(archive_path.resolve())
   command = [
     "rar",
@@ -159,6 +160,7 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
     "-r",
     "-ol",
     f"-hp{password}",
+    f"-mt{rar_threads}",
     archive_target,
     source_dir.name,
   ]

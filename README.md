@@ -61,6 +61,17 @@ API_PASSWORD="your_api_password"
 SERVER_SLUG="your_server_slug"
 ```
 
+#### Resource Limits
+
+`CPU_LIMIT` and `MEM_LIMIT` in `.env` are applied as `cpus` and `mem_limit` on the container, which act as hard ceilings for every process inside it (`rsync`, `rar`, ZIP compression, database dumps). In addition, the scheduler lowers its own scheduling priority at startup so backup workloads yield to other services on the host:
+
+- `NICE_LEVEL` - CPU scheduling priority offset for the backup process tree (default `10`, valid range `0`-`19`)
+- `IONICE_CLASS` - I/O scheduling class (`1` realtime, `2` best-effort, `3` idle; default `2`)
+- `IONICE_LEVEL` - I/O priority level within the class (default `7`, the lowest best-effort level)
+- `RAR_THREADS` - maximum thread count used by `rar` compression (default `1`)
+
+`rsync` and ZIP compression are single-threaded and only inherit the process priority above, while `rar` additionally accepts `-mt<RAR_THREADS>` so it cannot saturate every container CPU.
+
 ### Running with Docker & Makefile
 
 The project includes pre-configured `Makefile` commands for common operations:

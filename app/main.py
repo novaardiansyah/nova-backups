@@ -2,10 +2,12 @@ import sys
 
 from .logger import setup_logger
 from .scheduler import run_scheduler
+from .utils import apply_resource_limits
 
 
 def main():
   logger = setup_logger()
+  apply_resource_limits(logger)
   action = sys.argv[1] if len(sys.argv) > 1 else "scheduler"
   if action == "test":
     from .test import run_test

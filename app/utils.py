@@ -1,5 +1,8 @@
 import hashlib
+import os
 from pathlib import Path
+import shutil
+import subprocess
 
 
 def format_size(size_bytes: int | float) -> str:
@@ -99,3 +102,55 @@ def cleanup_empty_directories(target_dir: Path, stop_at: Path | None = None):
             current = current.parent
     except Exception:
         pass
+
+
+def get_env_int(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or not str(raw_value).strip():
+        return default
+    try:
+        return int(str(raw_value).strip())
+    except ValueError:
+        return default
+
+
+def apply_resource_limits(logger=None) -> None:
+    nice_level = get_env_int("NICE_LEVEL", 10)
+    try:
+        os.nice(nice_level)
+        if logger:
+            logger.info("Resource limits: process nice level set to %s", nice_level)
+    except (OSError, ValueError) as nice_err:
+        if logger:
+            logger.warning(
+                "Resource limits: failed to set nice level %s: %s", nice_level, nice_err
+            )
+
+    io_class = get_env_int("IONICE_CLASS", 2)
+    io_level = get_env_int("IONICE_LEVEL", 7)
+    ionice_path = shutil.which("ionice")
+    if ionice_path:
+        try:
+            subprocess.run(
+                [
+                    ionice_path,
+                    "-c",
+                    str(io_class),
+                    "-n",
+                    str(io_level),
+                    "-p",
+                    str(os.getpid()),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if logger:
+                logger.info(
+                    "Resource limits: ionice class %s level %s applied", io_class, io_level
+                )
+        except OSError as io_err:
+            if logger:
+                logger.warning(
+                    "Resource limits: failed to apply ionice: %s", io_err
+                )
