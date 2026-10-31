@@ -27,7 +27,14 @@ def resolve_source_path(raw_path: str) -> Path:
 
 def resolve_destination_path(raw_path: str) -> Path:
     if not raw_path:
-        return Path("/backup") if Path("/backup").exists() else Path("./backup")
+        if Path("/backup").exists():
+            return Path("/backup")
+        backup_env = os.environ.get("BACKUP_DESTINATION", "").strip().rstrip("/")
+        if backup_env and Path(backup_env).exists():
+            return Path(backup_env)
+        if Path("./backups").exists():
+            return Path("./backups")
+        return Path("./backup")
     backup_env = os.environ.get("BACKUP_DESTINATION", "").strip().rstrip("/")
     if Path("/backup").exists():
         if backup_env and raw_path.startswith(backup_env):
@@ -38,7 +45,43 @@ def resolve_destination_path(raw_path: str) -> Path:
         if "/Backups/" in raw_path:
             rel = raw_path.split("/Backups/", 1)[1]
             return Path("/backup") / rel
+        if "/backups/" in raw_path:
+            rel = raw_path.split("/backups/", 1)[1]
+            return Path("/backup") / rel
     return Path(raw_path)
+
+
+def clean_backups_directory(logger=None):
+    target_dirs = []
+    base_dir = resolve_destination_path("")
+    if base_dir.exists() and base_dir.is_dir():
+        target_dirs.append(base_dir)
+
+    local_backups = Path("./backups")
+    if local_backups.exists() and local_backups.is_dir():
+        try:
+            if not any(local_backups.samefile(d) for d in target_dirs):
+                target_dirs.append(local_backups)
+        except OSError:
+            if local_backups.resolve() not in [d.resolve() for d in target_dirs]:
+                target_dirs.append(local_backups)
+
+    for target_dir in target_dirs:
+        try:
+            for item in target_dir.iterdir():
+                if item.name == "recovery" or item.name == ".gitkeep":
+                    continue
+                try:
+                    if item.is_dir() and not item.is_symlink():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                except Exception as item_err:
+                    if logger:
+                        logger.warning("Failed to remove '%s': %s", item, item_err)
+        except Exception as dir_err:
+            if logger:
+                logger.warning("Failed to clean backup directory '%s': %s", target_dir, dir_err)
 
 
 def validate_source(source_path: Path):
@@ -272,8 +315,6 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
     archive_filename = f"{stem}{encrypt_type}"
 
     destination_dir = resolve_destination_path(raw_local_dest)
-    destination_dir.mkdir(parents=True, exist_ok=True)
-
     snapshot_dir = destination_dir / stem
     archive_file = destination_dir / archive_filename
 
@@ -285,6 +326,10 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
     logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
     logger.info("Local Destination: %s", destination_dir)
     logger.info("Archive Name: %s", archive_filename)
+
+    clean_backups_directory(logger)
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
 
     if schedule_id is not None:
         try:
@@ -505,11 +550,13 @@ def run_backup(config=None, logger=None):
         schedules = fetch_backup_schedules(logger=logger)
         if not schedules:
             logger.info("No backup schedules retrieved from API.")
+            clean_backups_directory(logger)
             return
 
         enabled_schedules = [s for s in schedules if s.get("is_enabled", True)]
         if not enabled_schedules:
             logger.info("No enabled backup schedules to process.")
+            clean_backups_directory(logger)
             return
 
         logger.info("Found %d enabled schedule(s) to backup.", len(enabled_schedules))
