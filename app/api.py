@@ -5,6 +5,8 @@ import requests
 
 from .logger import setup_logger
 
+from .pending_api import queue_pending_api_event, retry_pending_api_events
+
 
 def get_env_temp_path() -> Path:
     app_dir = Path("/app")
@@ -206,6 +208,8 @@ def fetch_backup_schedules(
     if logger:
         logger.info("Requesting backup schedules from API for server '%s'...", slug)
 
+    retry_pending_api_events(logger=logger)
+
     resp = requests.get(schedules_url, headers=headers, params=params, timeout=120)
 
     if resp.status_code == 401:
@@ -244,43 +248,50 @@ def send_backup_report(
         return None
 
     backups_url = f"{base_url}/backups"
-    token = get_valid_token(logger=logger)
+    try:
+        token = get_valid_token(logger=logger)
 
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
 
-    if logger:
-        logger.info("Sending backup report to API (%s)...", payload.get("status"))
-
-    resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
-
-    if resp.status_code == 401:
         if logger:
-            logger.warning("Token expired or rejected. Refreshing token and retrying...")
-        token = get_valid_token(force_refresh=True, logger=logger)
-        headers["Authorization"] = f"Bearer {token}"
+            logger.info("Sending backup report to API (%s)...", payload.get("status"))
+
         resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
 
-    if resp.status_code not in (200, 201, 204):
+        if resp.status_code == 401:
+            if logger:
+                logger.warning("Token expired or rejected. Refreshing token and retrying...")
+            token = get_valid_token(force_refresh=True, logger=logger)
+            headers["Authorization"] = f"Bearer {token}"
+            resp = requests.post(backups_url, json=payload, headers=headers, timeout=120)
+
+        if resp.status_code not in (200, 201, 204):
+            if logger:
+                logger.warning(
+                    "Failed to send backup report (%d): %s",
+                    resp.status_code,
+                    resp.text,
+                )
+            queue_pending_api_event("backup_report", payload, logger=logger)
+            return None
+
+        try:
+            resp_json = resp.json()
+        except Exception:
+            resp_json = {}
+
         if logger:
-            logger.warning(
-                "Failed to send backup report (%d): %s",
-                resp.status_code,
-                resp.text,
-            )
+            logger.info("Backup report successfully recorded by API.")
+        return resp_json
+    except Exception as err:
+        if logger:
+            logger.warning("Error sending backup report: %s", err)
+        queue_pending_api_event("backup_report", payload, logger=logger)
         return None
-
-    try:
-        resp_json = resp.json()
-    except Exception:
-        resp_json = {}
-
-    if logger:
-        logger.info("Backup report successfully recorded by API.")
-    return resp_json
 
 
 def mark_backup_schedule_started(
@@ -295,43 +306,52 @@ def mark_backup_schedule_started(
         return None
 
     start_url = f"{base_url}/schedules/{schedule_id}/start"
-    token = get_valid_token(logger=logger)
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
-
-    if logger:
-        logger.info("Notifying API that backup schedule ID %s has started...", schedule_id)
-
-    resp = requests.post(start_url, headers=headers, timeout=120)
-
-    if resp.status_code == 401:
-        if logger:
-            logger.warning("Token expired or rejected. Refreshing token and retrying...")
-        token = get_valid_token(force_refresh=True, logger=logger)
-        headers["Authorization"] = f"Bearer {token}"
-        resp = requests.post(start_url, headers=headers, timeout=120)
-
-    if resp.status_code not in (200, 201, 204):
-        if logger:
-            logger.warning(
-                "Failed to notify API of schedule start (%d): %s",
-                resp.status_code,
-                resp.text,
-            )
-        return None
+    pending_payload = {"schedule_id": schedule_id}
 
     try:
-        resp_json = resp.json()
-    except Exception:
-        resp_json = {}
+        token = get_valid_token(logger=logger)
 
-    if logger:
-        logger.info("Schedule ID %s start timestamp successfully recorded by API.", schedule_id)
-    return resp_json
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+
+        if logger:
+            logger.info("Notifying API that backup schedule ID %s has started...", schedule_id)
+
+        resp = requests.post(start_url, headers=headers, timeout=120)
+
+        if resp.status_code == 401:
+            if logger:
+                logger.warning("Token expired or rejected. Refreshing token and retrying...")
+            token = get_valid_token(force_refresh=True, logger=logger)
+            headers["Authorization"] = f"Bearer {token}"
+            resp = requests.post(start_url, headers=headers, timeout=120)
+
+        if resp.status_code not in (200, 201, 204):
+            if logger:
+                logger.warning(
+                    "Failed to notify API of schedule start (%d): %s",
+                    resp.status_code,
+                    resp.text,
+                )
+            queue_pending_api_event("schedule_start", pending_payload, logger=logger)
+            return None
+
+        try:
+            resp_json = resp.json()
+        except Exception:
+            resp_json = {}
+
+        if logger:
+            logger.info("Schedule ID %s start timestamp successfully recorded by API.", schedule_id)
+        return resp_json
+    except Exception as err:
+        if logger:
+            logger.warning("Error notifying API of schedule start: %s", err)
+        queue_pending_api_event("schedule_start", pending_payload, logger=logger)
+        return None
 
 
 

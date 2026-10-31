@@ -26,6 +26,9 @@ Thumbs.db
 config.local.yaml
 config.yaml
 
+# Runtime state
+pending_api.json
+
 # Backup data
 Backups/
 backup/
