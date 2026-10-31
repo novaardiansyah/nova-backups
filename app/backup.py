@@ -384,7 +384,8 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
                     command.append(f"--include={pattern}/**")
                 for pattern in excludes:
                     command.append(f"--exclude={pattern}")
-                command.append("--exclude=*")
+                if includes:
+                    command.append("--exclude=*")
                 command.extend([
                     f"{source_path}/",
                     f"{snapshot_dir}/",
