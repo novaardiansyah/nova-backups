@@ -343,6 +343,13 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
     elif isinstance(exclude_raw, list):
         excludes = [str(x).strip() for x in exclude_raw if str(x).strip()]
 
+    include_raw = schedule.get("include", "")
+    includes = []
+    if isinstance(include_raw, str) and include_raw.strip():
+        includes = [x.strip() for x in include_raw.split(",") if x.strip()]
+    elif isinstance(include_raw, list):
+        includes = [str(x).strip() for x in include_raw if str(x).strip()]
+
     try:
         if snapshot_dir.exists():
             shutil.rmtree(snapshot_dir, ignore_errors=True)
@@ -372,8 +379,12 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
                     "--numeric-ids",
                     "--delete",
                 ]
+                for pattern in includes:
+                    command.append(f"--include={pattern}")
+                    command.append(f"--include={pattern}/**")
                 for pattern in excludes:
                     command.append(f"--exclude={pattern}")
+                command.append("--exclude=*")
                 command.extend([
                     f"{source_path}/",
                     f"{snapshot_dir}/",
