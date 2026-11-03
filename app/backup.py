@@ -373,7 +373,7 @@ def run_single_backup(
             source_path = resolve_source_path(raw_source)
             validate_source(source_path)
 
-            logger.info("Syncing source files from: %s", source_path)
+            logger.info("Syncing source files...")
 
             if source_path.is_dir():
                 command = [
@@ -500,7 +500,7 @@ def run_single_backup(
         duration_str = format_duration(duration)
         size_str = format_size(archive_size)
         logger.info(
-            "%sBackup completed successfully: %s (%s in %s)",
+            "%s%s (%s in %s) finish backup.",
             prefix,
             name,
             size_str,

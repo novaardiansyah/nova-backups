@@ -133,7 +133,7 @@ def upload_file_to_gdrive(
     file_size = file_path.stat().st_size
     file_name = file_path.name
 
-    logger.info("Uploading to Google Drive: %s (%s) -> %s", file_name, format_size(file_size), target_folder)
+    logger.info("Uploading to Google Drive:")
 
     upload_content_type = "application/x-rar-compressed" if file_name.endswith(".rar") else "application/zip"
 
@@ -213,7 +213,7 @@ def upload_file_to_gdrive(
             val = min(int(uploaded * 100 / file_size), 100)
 
             if is_tty:
-                sys.stdout.write(f"\rUploading to Google Drive: {format_size(uploaded)} / {format_size(file_size)} ({val}%) at {last_speed_str}\033[K")
+                sys.stdout.write(f"\rUploading {format_size(uploaded)} / {format_size(file_size)} ({val}%) at {last_speed_str}\033[K")
                 sys.stdout.flush()
 
             if val != last_percent:
@@ -224,7 +224,7 @@ def upload_file_to_gdrive(
                 last_milestone = milestone
                 log_milestone(
                     logger,
-                    f"Uploading to Google Drive: {format_size(milestone)} / {format_size(file_size)} ({val}%) at {last_speed_str}",
+                    f"Uploading {format_size(milestone)} / {format_size(file_size)} ({val}%) at {last_speed_str}",
                     is_tty,
                 )
 
@@ -239,7 +239,7 @@ def upload_file_to_gdrive(
     if uploaded > 0 and last_milestone < uploaded:
         log_milestone(
             logger,
-            f"Uploading to Google Drive: {format_size(uploaded)} / {format_size(file_size)} (100%) at {final_speed_str}",
+            f"Uploading {format_size(uploaded)} / {format_size(file_size)} (100%) at {final_speed_str}",
             is_tty,
         )
         last_milestone = uploaded
