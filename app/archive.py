@@ -43,18 +43,18 @@ class ProgressReporter:
       elapsed = now - self.start_time
       if elapsed > 0:
         self.last_speed_str = format_speed(processed / elapsed)
-    speed_display = f" ({self.last_speed_str})"
+    speed_display = f" at {self.last_speed_str}" if self.last_speed_str != "0 B/s" else ""
 
     val = min(100, int(processed * 100 / self.total_bytes))
     if self.is_tty and val != self.last_percent:
       self.last_percent = val
-      sys.stdout.write(f"\r{self.label}: {val}%{speed_display}\033[K")
+      sys.stdout.write(f"\r{self.label}: {format_size(processed)} / {format_size(self.total_bytes)} ({val}%){speed_display}\033[K")
       sys.stdout.flush()
 
     milestone = (processed // self.milestone_step) * self.milestone_step
     if milestone > 0 and milestone > self.last_milestone:
       self.last_milestone = milestone
-      log_milestone(self.logger, f"{self.label}: {format_size(milestone)} ({val}%){speed_display}", self.is_tty)
+      log_milestone(self.logger, f"{self.label}: {format_size(milestone)} / {format_size(self.total_bytes)} ({val}%){speed_display}", self.is_tty)
 
   def finish(self):
     if self.is_tty and self.last_percent != -1:
@@ -63,10 +63,10 @@ class ProgressReporter:
 
     total_duration = time.time() - self.start_time
     avg_speed = self.total_bytes / total_duration if total_duration > 0 and self.total_bytes > 0 else 0
-    final_speed_str = f" ({format_speed(avg_speed)})" if avg_speed > 0 else ""
+    final_speed_str = f" at {format_speed(avg_speed)}" if avg_speed > 0 else ""
 
     if self.total_bytes > 0 and self.last_milestone < self.total_bytes:
-      log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)} (100%){final_speed_str}", self.is_tty)
+      log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)} / {format_size(self.total_bytes)} (100%){final_speed_str}", self.is_tty)
       self.last_milestone = self.total_bytes
 
 
@@ -176,14 +176,14 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
 
   if result.returncode not in (0, 1, 6):
     error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
-    raise RuntimeError(f"rar compression failed: {error_msg}")
+    raise RuntimeError(f"RAR compression failed: {error_msg}")
 
   if result.returncode in (1, 6) and logger:
-    logger.warning("rar compression completed with non-fatal warnings (exit code %s)", result.returncode)
+    logger.warning("RAR compression completed with non-fatal warnings (code %s)", result.returncode)
 
   if not archive_path.exists() or archive_path.stat().st_size == 0:
     error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
-    raise RuntimeError(f"rar compression failed to produce archive: {error_msg}")
+    raise RuntimeError(f"RAR compression failed to produce archive: {error_msg}")
 
   return archive_path.stat().st_size if archive_path.exists() else 0
 
@@ -217,7 +217,7 @@ def extract_encrypted_rar(archive_path: Path, destination_dir: Path, password: s
 
   if result.returncode not in (0, 1):
     error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
-    raise RuntimeError(f"rar extraction failed: {error_msg}")
+    raise RuntimeError(f"RAR extraction failed: {error_msg}")
 
   if result.returncode == 1 and logger:
-    logger.warning("rar extraction completed with non-fatal warnings (exit code 1)")
+    logger.warning("RAR extraction completed with non-fatal warnings (code 1)")

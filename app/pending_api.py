@@ -34,9 +34,7 @@ def save_pending_api_events(events: list[dict], logger=None) -> None:
       json.dump(events, f, indent=2, ensure_ascii=False)
   except Exception as err:
     if logger:
-      logger.warning(
-        "Failed to write pending API events file '%s': %s", path, err
-      )
+      logger.warning("Failed to save pending API events: %s", err)
 
 
 def queue_pending_api_event(event_type: str, payload: dict, logger=None) -> None:
@@ -50,11 +48,7 @@ def queue_pending_api_event(event_type: str, payload: dict, logger=None) -> None
   )
   save_pending_api_events(events, logger=logger)
   if logger:
-    logger.warning(
-      "Pending %s event saved to %s for later retry.",
-      event_type,
-      get_pending_api_path(),
-    )
+    logger.warning("Saved pending %s event for retry.", event_type)
 
 
 def retry_pending_api_events(logger=None) -> None:
@@ -63,11 +57,7 @@ def retry_pending_api_events(logger=None) -> None:
     return
 
   if logger:
-    logger.info(
-      "Retrying %d pending API event(s) from %s...",
-      len(events),
-      get_pending_api_path(),
-    )
+    logger.info("Retrying %d pending API event(s)...", len(events))
 
   from .api import mark_backup_schedule_started, send_backup_report
 

@@ -133,7 +133,7 @@ def upload_file_to_gdrive(
     file_size = file_path.stat().st_size
     file_name = file_path.name
 
-    logger.info("Uploading snapshot to Google Drive: %s -> %s", file_name, target_folder)
+    logger.info("Uploading to Google Drive: %s (%s) -> %s", file_name, format_size(file_size), target_folder)
 
     upload_content_type = "application/x-rar-compressed" if file_name.endswith(".rar") else "application/zip"
 
@@ -213,7 +213,7 @@ def upload_file_to_gdrive(
             val = min(int(uploaded * 100 / file_size), 100)
 
             if is_tty:
-                sys.stdout.write(f"\rUploading to Google Drive: {val}% ({last_speed_str})\033[K")
+                sys.stdout.write(f"\rUploading to Google Drive: {format_size(uploaded)} / {format_size(file_size)} ({val}%) at {last_speed_str}\033[K")
                 sys.stdout.flush()
 
             if val != last_percent:
@@ -222,7 +222,11 @@ def upload_file_to_gdrive(
             milestone = (uploaded // milestone_step) * milestone_step
             if milestone > 0 and milestone > last_milestone:
                 last_milestone = milestone
-                log_milestone(logger, f"Uploading to Google Drive: {format_size(milestone)} ({val}%) ({last_speed_str})", is_tty)
+                log_milestone(
+                    logger,
+                    f"Uploading to Google Drive: {format_size(milestone)} / {format_size(file_size)} ({val}%) at {last_speed_str}",
+                    is_tty,
+                )
 
     if is_tty and last_percent != -1:
         sys.stdout.write("\n")
@@ -233,9 +237,11 @@ def upload_file_to_gdrive(
     final_speed_str = format_speed(avg_speed)
 
     if uploaded > 0 and last_milestone < uploaded:
-        log_milestone(logger, f"Uploading to Google Drive: {format_size(uploaded)} (100%) ({final_speed_str})", is_tty)
+        log_milestone(
+            logger,
+            f"Uploading to Google Drive: {format_size(uploaded)} / {format_size(file_size)} (100%) at {final_speed_str}",
+            is_tty,
+        )
         last_milestone = uploaded
 
-    logger.info("UPLOAD TO GOOGLE DRIVE SUCCESS: %s", file_name)
-
-
+    logger.info("Upload to Google Drive completed: %s", file_name)

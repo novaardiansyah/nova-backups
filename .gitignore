@@ -44,3 +44,6 @@ Makefile
 !/backups/recovery/
 /backups/recovery/*
 !/backups/recovery/.gitkeep
+
+
+skills

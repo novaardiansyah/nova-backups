@@ -106,16 +106,15 @@ def run_test(logger=None) -> bool:
   archive_file = test_dir / f"test_backup{encrypt_type}"
 
   logger.info("========================================")
-  logger.info("TEST: Starting compression and extraction test")
-  logger.info("TEST: Archive type: %s", encrypt_type)
+  logger.info("Starting archive self-test (%s)...", encrypt_type)
 
   try:
     expected_hashes, expected_sizes = generate_test_dataset(source_dir)
     total_files = len(expected_hashes)
     total_bytes = sum(expected_sizes.values())
-    logger.info("TEST: Generated %d test files (%s)", total_files, format_size(total_bytes))
+    logger.info("Generated %d test files (%s).", total_files, format_size(total_bytes))
 
-    logger.info("TEST: Compressing to %s...", archive_file.name)
+    logger.info("Creating encrypted test archive: %s...", archive_file.name)
     if encrypt_type == ".rar":
       create_encrypted_rar(source_dir, archive_file, password, logger)
     else:
@@ -125,9 +124,9 @@ def run_test(logger=None) -> bool:
       raise RuntimeError(f"Archive file {archive_file} was not created or is empty")
 
     archive_size = archive_file.stat().st_size
-    logger.info("TEST: Archive created successfully: %s (%s)", archive_file.name, format_size(archive_size))
+    logger.info("Archive created successfully: %s (%s)", archive_file.name, format_size(archive_size))
 
-    logger.info("TEST: Extracting archive to %s...", extract_dir)
+    logger.info("Extracting test archive: %s...", archive_file.name)
     if encrypt_type == ".rar":
       extract_encrypted_rar(archive_file, extract_dir, password, logger)
     else:
@@ -142,7 +141,7 @@ def run_test(logger=None) -> bool:
         rel_posix = full_path.relative_to(extracted_root).as_posix()
         extracted_files[rel_posix] = full_path
 
-    logger.info("TEST: Extracted %d files. Verifying integrity...", len(extracted_files))
+    logger.info("Extracted %d files. Verifying data integrity...", len(extracted_files))
 
     if len(extracted_files) != total_files:
       missing = set(expected_hashes.keys()) - set(extracted_files.keys())
@@ -170,7 +169,7 @@ def run_test(logger=None) -> bool:
           f"Checksum mismatch for '{rel_posix}': data is corrupted!"
         )
 
-    logger.info("TEST PASSED: All %d files successfully verified. Integrity 100%% intact.", total_files)
+    logger.info("Archive self-test passed: All %d files verified (integrity 100%% intact).", total_files)
     logger.info("========================================")
     return True
 

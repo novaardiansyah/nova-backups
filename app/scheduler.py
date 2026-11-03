@@ -35,12 +35,12 @@ def run_scheduler(logger=None):
     interval_raw = os.environ.get("BACKUP_INTERVAL") or "60"
     interval_seconds = max(1, parse_interval(interval_raw, default=60))
 
-    logger.info("Starting Backup Scheduler (Interval: %s seconds / %s)...", interval_seconds, interval_raw)
+    logger.info("Starting backup scheduler (check interval: %s)...", interval_raw)
 
     stop_event = threading.Event()
 
     def signal_handler(signum, frame):
-        logger.info("Received termination signal (%s). Shutting down scheduler...", signum)
+        logger.info("Termination signal received (%s). Stopping backup scheduler...", signum)
         stop_event.set()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -49,7 +49,7 @@ def run_scheduler(logger=None):
     try:
         run_backup({}, logger)
     except Exception as err:
-        logger.error("Initial backup run encountered error: %s", err)
+        logger.error("Initial backup run failed: %s", err)
 
     while not stop_event.is_set():
         if stop_event.wait(timeout=interval_seconds):
@@ -57,6 +57,6 @@ def run_scheduler(logger=None):
         try:
             run_backup({}, logger)
         except Exception as err:
-            logger.error("Scheduled backup run encountered error: %s", err)
+            logger.error("Scheduled backup run failed: %s", err)
 
-    logger.info("Backup Scheduler stopped.")
+    logger.info("Backup scheduler stopped.")

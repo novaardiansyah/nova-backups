@@ -13,7 +13,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import setup_logger
-from .utils import BackupLock, calculate_checksum, cleanup_empty_directories
+from .utils import BackupLock, calculate_checksum, cleanup_empty_directories, format_duration, format_size
 
 
 def resolve_source_path(raw_path: str) -> Path:
@@ -105,7 +105,7 @@ def dump_mysql_database(database_name: str, target_file: Path, logger):
     if not database_name:
         raise ValueError("database_name is required for MySQL database backup")
 
-    logger.info("Dumping MySQL database '%s' from %s:%s...", database_name, host, port)
+    logger.info("Exporting MySQL database '%s'...", database_name)
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -157,7 +157,8 @@ def dump_mysql_database(database_name: str, target_file: Path, logger):
         target_file.unlink(missing_ok=True)
         raise RuntimeError(f"mysqldump produced an empty file for '{database_name}'")
 
-    logger.info("MySQL database dump completed: %s", target_file)
+    db_size = target_file.stat().st_size if target_file.exists() else 0
+    logger.info("MySQL database exported successfully: %s (%s)", database_name, format_size(db_size))
 
 
 def find_sqlserver_backup_file(bak_filename: str) -> Path | None:
@@ -191,12 +192,7 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
     bak_filename = f"{database_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
     target_disk_path = f"/var/opt/mssql/backup/{bak_filename}"
 
-    logger.info(
-        "Executing SQL Server backup for database '%s' on %s:%s...",
-        database_name,
-        host,
-        port,
-    )
+    logger.info("Exporting SQL Server database '%s'...", database_name)
 
     backup_query = (
         f"BACKUP DATABASE [{database_name}] "
@@ -274,10 +270,18 @@ def dump_sqlserver_database(database_name: str, target_file: Path, logger):
         created_bak.unlink(missing_ok=True)
     except OSError:
         pass
-    logger.info("SQL Server database backup completed: %s", target_file)
+    db_size = target_file.stat().st_size if target_file.exists() else 0
+    logger.info("SQL Server database exported successfully: %s (%s)", database_name, format_size(db_size))
 
 
-def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, logger) -> bool:
+def run_single_backup(
+    schedule: dict,
+    encrypt_password: str,
+    encrypt_type: str,
+    logger,
+    item_index: int = 1,
+    total_items: int = 1,
+) -> bool:
     start_time = time.time()
     tz = ZoneInfo("Asia/Jakarta")
     started_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -322,10 +326,11 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
     cloud_dest = raw_cloud_dest or "/backups"
     cloud_file_path = f"{cloud_dest.rstrip('/')}/{archive_filename}" if (is_sync_cloud and gdrive_enabled) else None
 
+    prefix = f"[{item_index}/{total_items}] " if total_items > 1 else ""
+
     logger.info("========================================")
-    logger.info("START BACKUP: %s (ID: %s)", name, schedule_id)
-    logger.info("Local Destination: %s", destination_dir)
-    logger.info("Archive Name: %s", archive_filename)
+    logger.info("%sStarting backup: %s (ID: %s)", prefix, name, schedule_id)
+    logger.info("Target archive: %s", archive_filename)
 
     clean_backups_directory(logger)
 
@@ -335,7 +340,7 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
         try:
             mark_backup_schedule_started(schedule_id, logger=logger)
         except Exception as start_err:
-            logger.warning("Failed to notify API of backup start: %s", start_err)
+            logger.warning("Failed to report backup start to API: %s", start_err)
 
     excludes = []
     if isinstance(exclude_raw, str) and exclude_raw.strip():
@@ -368,7 +373,7 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
             source_path = resolve_source_path(raw_source)
             validate_source(source_path)
 
-            logger.info("Backing up source: %s -> %s", source_path, snapshot_dir)
+            logger.info("Syncing source files from: %s", source_path)
 
             if source_path.is_dir():
                 command = [
@@ -414,14 +419,14 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
             )
 
             if result.stdout.strip():
-                logger.info(result.stdout.rstrip())
+                logger.debug(result.stdout.rstrip())
 
             if result.returncode != 0:
                 raise RuntimeError(
                     f"rsync failed for '{source_path}' with exit code {result.returncode}"
                 )
 
-        logger.info("Compressing snapshot to encrypted %s: %s", encrypt_type.upper().lstrip("."), archive_file)
+        logger.info("Compressing files into encrypted %s archive...", encrypt_type.upper().lstrip("."))
 
         if archive_file.exists():
             archive_file.unlink()
@@ -439,9 +444,9 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-        logger.info("BACKUP ARCHIVE CREATED: %s", archive_file)
-
         archive_size = archive_file.stat().st_size if archive_file.exists() else 0
+        logger.info("Archive created: %s (%s)", archive_filename, format_size(archive_size))
+
         checksum = calculate_checksum(archive_file)
 
         if is_sync_cloud and gdrive_enabled:
@@ -453,16 +458,16 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
                     if snapshot_dir.exists():
                         shutil.rmtree(snapshot_dir, ignore_errors=True)
                     cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
-                    logger.info("Removed local archive and directories per keep_local_backup=False")
+                    logger.info("Local temporary files cleaned up.")
             except Exception:
-                logger.exception("GOOGLE DRIVE UPLOAD FAILED")
+                logger.error("Google Drive upload failed for '%s'", archive_filename)
                 raise
         elif not keep_local:
             archive_file.unlink(missing_ok=True)
             if snapshot_dir.exists():
                 shutil.rmtree(snapshot_dir, ignore_errors=True)
             cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
-            logger.info("Removed local archive and directories per keep_local_backup=False")
+            logger.info("Local temporary files cleaned up.")
 
         end_time = time.time()
         completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -492,19 +497,29 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
             except Exception as report_err:
                 logger.warning("Failed to send backup report to API: %s", report_err)
 
-        logger.info("BACKUP SUCCESS: %s", name)
+        duration_str = format_duration(duration)
+        size_str = format_size(archive_size)
+        logger.info(
+            "%sBackup completed successfully: %s (%s in %s)",
+            prefix,
+            name,
+            size_str,
+            duration_str,
+        )
         return True
 
     except Exception as err:
-        logger.exception("BACKUP FAILED: %s", name)
+        end_time = time.time()
+        completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        duration = max(0, int(end_time - start_time))
+        duration_str = format_duration(duration)
+
+        logger.error("%sBackup failed: %s after %s - %s", prefix, name, duration_str, err)
+
         shutil.rmtree(snapshot_dir, ignore_errors=True)
         if archive_file.exists():
             archive_file.unlink(missing_ok=True)
         cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
-
-        end_time = time.time()
-        completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-        duration = max(0, int(end_time - start_time))
 
         if schedule_id is not None:
             report_payload = {
@@ -532,9 +547,6 @@ def run_single_backup(schedule: dict, encrypt_password: str, encrypt_type: str, 
 
         return False
 
-    finally:
-        logger.info("========================================")
-
 
 def run_backup(config=None, logger=None):
     if logger is None:
@@ -545,7 +557,7 @@ def run_backup(config=None, logger=None):
 
     lock = BackupLock()
     if not lock.acquire():
-        logger.warning("Previous backup process is still running. Skipping this backup execution.")
+        logger.warning("Previous backup process is still running. Skipping this cycle.")
         return
 
     try:
@@ -561,7 +573,7 @@ def run_backup(config=None, logger=None):
 
         schedules = fetch_backup_schedules(logger=logger)
         if not schedules:
-            logger.info("No backup schedules retrieved from API.")
+            logger.info("No active backup schedules found.")
             clean_backups_directory(logger)
             return
 
@@ -571,20 +583,32 @@ def run_backup(config=None, logger=None):
             clean_backups_directory(logger)
             return
 
-        logger.info("Found %d enabled schedule(s) to backup.", len(enabled_schedules))
+        total_schedules = len(enabled_schedules)
+        logger.info("Found %d enabled schedule(s) to backup.", total_schedules)
 
+        start_all_time = time.time()
         success_count = 0
         fail_count = 0
 
-        for schedule in enabled_schedules:
-            success = run_single_backup(schedule, encrypt_password, encrypt_type, logger)
+        for index, schedule in enumerate(enabled_schedules, start=1):
+            success = run_single_backup(
+                schedule,
+                encrypt_password,
+                encrypt_type,
+                logger,
+                item_index=index,
+                total_items=total_schedules,
+            )
             if success:
                 success_count += 1
             else:
                 fail_count += 1
 
+        total_elapsed = format_duration(time.time() - start_all_time)
+        logger.info("========================================")
         logger.info(
-            "ALL BACKUP TASKS FINISHED: %d succeeded, %d failed.",
+            "All backup tasks completed in %s: %d succeeded, %d failed.",
+            total_elapsed,
             success_count,
             fail_count,
         )

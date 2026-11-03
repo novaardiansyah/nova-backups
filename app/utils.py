@@ -30,6 +30,21 @@ def format_speed(bytes_per_sec: float) -> str:
     return f"{format_size(bytes_per_sec)}/s"
 
 
+def format_duration(seconds: int | float) -> str:
+    sec = int(round(seconds))
+    if sec < 60:
+        return f"{sec}s"
+    minutes = sec // 60
+    rem_sec = sec % 60
+    if minutes < 60:
+        return f"{minutes}m {rem_sec}s" if rem_sec > 0 else f"{minutes}m"
+    hours = minutes // 60
+    rem_min = minutes % 60
+    if rem_sec > 0:
+        return f"{hours}h {rem_min}m {rem_sec}s"
+    return f"{hours}h {rem_min}m" if rem_min > 0 else f"{hours}h"
+
+
 def calculate_checksum(file_path: Path) -> str | None:
     try:
         if not file_path.exists() or not file_path.is_file():
@@ -116,18 +131,19 @@ def get_env_int(name: str, default: int) -> int:
 
 def apply_resource_limits(logger=None) -> None:
     nice_level = get_env_int("NICE_LEVEL", 10)
+    nice_applied = False
     try:
         os.nice(nice_level)
-        if logger:
-            logger.info("Resource limits: process nice level set to %s", nice_level)
+        nice_applied = True
     except (OSError, ValueError) as nice_err:
         if logger:
             logger.warning(
-                "Resource limits: failed to set nice level %s: %s", nice_level, nice_err
+                "Could not set process priority (nice level %s): %s", nice_level, nice_err
             )
 
     io_class = get_env_int("IONICE_CLASS", 2)
     io_level = get_env_int("IONICE_LEVEL", 7)
+    io_applied = False
     ionice_path = shutil.which("ionice")
     if ionice_path:
         try:
@@ -145,12 +161,17 @@ def apply_resource_limits(logger=None) -> None:
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            if logger:
-                logger.info(
-                    "Resource limits: ionice class %s level %s applied", io_class, io_level
-                )
+            io_applied = True
         except OSError as io_err:
             if logger:
                 logger.warning(
-                    "Resource limits: failed to apply ionice: %s", io_err
+                    "Could not set I/O priority (ionice): %s", io_err
                 )
+
+    if logger:
+        if nice_applied and io_applied:
+            logger.info("Process priority configured (nice: %s, ionice: class %s level %s).", nice_level, io_class, io_level)
+        elif nice_applied:
+            logger.info("Process priority configured (nice: %s).", nice_level)
+        elif io_applied:
+            logger.info("Process priority configured (ionice: class %s level %s).", io_class, io_level)
