@@ -168,8 +168,8 @@ def setup_logger():
         return logger
 
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        "%(asctime)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M",
     )
 
     file_handler = DailyRotatingFileHandler(
