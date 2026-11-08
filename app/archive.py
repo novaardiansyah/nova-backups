@@ -165,24 +165,33 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
     source_dir.name,
   ]
 
-  result = subprocess.run(
+  process = subprocess.Popen(
     command,
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
     text=True,
-    check=False,
     cwd=source_dir.parent,
   )
 
-  if result.returncode not in (0, 1, 6):
-    error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
+  output_lines = []
+  if process.stdout is not None:
+    for line in process.stdout:
+      output_lines.append(line)
+      if logger:
+        logger.info(line.rstrip("\n"))
+
+  returncode = process.wait()
+  output_text = "".join(output_lines)
+
+  if returncode not in (0, 1, 6):
+    error_msg = output_text.strip() if output_text else f"exit code {returncode}"
     raise RuntimeError(f"RAR compression failed: {error_msg}")
 
-  if result.returncode in (1, 6) and logger:
-    logger.warning("RAR compression completed with non-fatal warnings (code %s)", result.returncode)
+  if returncode in (1, 6) and logger:
+    logger.warning("RAR compression completed with non-fatal warnings (code %s)", returncode)
 
   if not archive_path.exists() or archive_path.stat().st_size == 0:
-    error_msg = result.stdout.strip() if result.stdout else f"exit code {result.returncode}"
+    error_msg = output_text.strip() if output_text else f"exit code {returncode}"
     raise RuntimeError(f"RAR compression failed to produce archive: {error_msg}")
 
   return archive_path.stat().st_size if archive_path.exists() else 0
