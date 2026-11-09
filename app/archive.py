@@ -26,12 +26,16 @@ class ProgressReporter:
     self.last_sample_bytes = 0
     self.last_speed_str = "0 B/s"
     self.last_percent = -1
+    self.last_processed = 0
     self.milestone_step = 50 * 1024 * 1024
     self.last_milestone = 0
 
   def update(self, processed: int):
     if self.total_bytes <= 0:
       return
+
+    processed = max(processed, self.last_processed)
+    self.last_processed = processed
 
     now = time.time()
     delta_time = now - self.last_sample_time
@@ -46,16 +50,16 @@ class ProgressReporter:
         self.last_speed_str = format_speed(processed / elapsed)
     speed_display = f" at {self.last_speed_str}" if self.last_speed_str != "0 B/s" else ""
 
-    val = min(100, int(processed * 100 / self.total_bytes))
+    val = min(99, int(processed * 100 / self.total_bytes))
     if self.is_tty and val != self.last_percent:
       self.last_percent = val
       sys.stdout.write(f"\r{self.label}: {format_size(processed)} / {format_size(self.total_bytes)} ({val}%){speed_display}\033[K")
       sys.stdout.flush()
 
-    milestone = (processed // self.milestone_step) * self.milestone_step
-    if milestone > 0 and milestone > self.last_milestone:
-      self.last_milestone = milestone
-      log_milestone(self.logger, f"{self.label}: {format_size(milestone)} / {format_size(self.total_bytes)} ({val}%){speed_display}", self.is_tty)
+    while self.last_milestone + self.milestone_step <= processed and self.last_milestone + self.milestone_step < self.total_bytes:
+      self.last_milestone += self.milestone_step
+      milestone_val = min(99, int(self.last_milestone * 100 / self.total_bytes))
+      log_milestone(self.logger, f"{self.label}: {format_size(self.last_milestone)} / {format_size(self.total_bytes)} ({milestone_val}%){speed_display}", self.is_tty)
 
   def finish(self):
     if self.is_tty and self.last_percent != -1:
@@ -66,7 +70,9 @@ class ProgressReporter:
     avg_speed = self.total_bytes / total_duration if total_duration > 0 and self.total_bytes > 0 else 0
     final_speed_str = f" at {format_speed(avg_speed)}" if avg_speed > 0 else ""
 
-    if self.total_bytes > 0 and self.last_milestone < self.total_bytes:
+    if self.total_bytes <= 0:
+      log_milestone(self.logger, f"{self.label}: 0 B / 0 B (100%){final_speed_str}", self.is_tty)
+    elif self.last_milestone < self.total_bytes:
       log_milestone(self.logger, f"{self.label}: {format_size(self.total_bytes)} / {format_size(self.total_bytes)} (100%){final_speed_str}", self.is_tty)
       self.last_milestone = self.total_bytes
 
@@ -177,37 +183,127 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
       file_sizes[arcname] = st.st_size
 
   reporter = ProgressReporter(logger, "Archiving", total_bytes)
-  processed = 0
+  completed = set()
+  completed_bytes = 0
+  current_arcname = None
+  current_pct = 0
+  raw_output = []
+  current_chars = []
+
+  def handle_text(text: str) -> None:
+    nonlocal completed_bytes, current_arcname, current_pct
+
+    stripped = text.strip()
+    if not stripped.startswith("Adding"):
+      return
+
+    name_match = re.match(r"Adding\s+(.*?)\s+(OK|(?:\d{1,3}%))\s*$", stripped)
+    if not name_match:
+      return
+
+    raw_name = name_match.group(1).strip()
+    suffix = name_match.group(2)
+    clean_name = re.sub(r"\s+\d{1,3}%\s*$", "", raw_name).strip()
+    clean_name = clean_name.replace("\\", "/").removeprefix("./")
+
+    name = None
+    if clean_name in file_sizes:
+      name = clean_name
+    elif f"{source_dir.name}/{clean_name}" in file_sizes:
+      name = f"{source_dir.name}/{clean_name}"
+    elif clean_name.removeprefix(f"{source_dir.name}/") in file_sizes:
+      name = clean_name.removeprefix(f"{source_dir.name}/")
+
+    if not name or name in completed:
+      return
+
+    size = file_sizes[name]
+    done = suffix == "OK"
+
+    if done:
+      completed.add(name)
+      completed_bytes += size
+      if current_arcname == name:
+        current_arcname = None
+        current_pct = 0
+      reporter.update(completed_bytes)
+      return
+
+    pct_match = re.match(r"(\d{1,3})%", suffix)
+    pct = int(pct_match.group(1)) if pct_match else 0
+
+    if name != current_arcname:
+      current_arcname = name
+      current_pct = pct
+    else:
+      current_pct = max(current_pct, pct)
+
+    reporter.update(completed_bytes + size * current_pct // 100)
+
+  master_fd = None
+  slave_fd = None
+  try:
+    import pty
+    master_fd, slave_fd = pty.openpty()
+    stdout_target = slave_fd
+  except (ImportError, OSError):
+    stdout_target = subprocess.PIPE
 
   process = subprocess.Popen(
     command,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT,
-    text=True,
+    stdout=stdout_target,
+    stderr=stdout_target,
+    stdin=subprocess.DEVNULL,
     cwd=source_dir.parent,
   )
 
-  output_lines = []
-  if process.stdout is not None:
-    for line in process.stdout:
-      output_lines.append(line)
+  if slave_fd is not None:
+    os.close(slave_fd)
+    read_fd = master_fd
+  else:
+    read_fd = process.stdout.fileno() if process.stdout else None
 
-      cleaned = line.replace("\b", "").strip()
-      if not cleaned.startswith("Adding"):
-        continue
+  if read_fd is not None:
+    while True:
+      try:
+        data = os.read(read_fd, 1024)
+      except OSError:
+        break
+      if not data:
+        break
+      text = data.decode("utf-8", errors="replace")
+      raw_output.append(text)
+      for ch in text:
+        if ch == "\b":
+          if current_chars:
+            current_chars.pop()
+        elif ch in ("\r", "\n"):
+          if current_chars:
+            handle_text("".join(current_chars))
+          current_chars = []
+        else:
+          current_chars.append(ch)
+          if ch == "%":
+            handle_text("".join(current_chars))
+          elif len(current_chars) >= 2 and current_chars[-1] == "K" and current_chars[-2] == "O":
+            handle_text("".join(current_chars))
 
-      added_name = cleaned[len("Adding"):].strip()
-      if added_name.endswith("OK"):
-        added_name = added_name[:-2].strip()
-      added_name = re.sub(r"\s+\d+%\s*$", "", added_name).strip()
+    if current_chars:
+      handle_text("".join(current_chars))
 
-      size = file_sizes.get(added_name)
-      if size is not None:
-        processed += size
-        reporter.update(processed)
+    if master_fd is not None:
+      try:
+        os.close(master_fd)
+      except OSError:
+        pass
+    elif process.stdout:
+      try:
+        process.stdout.close()
+      except OSError:
+        pass
 
   returncode = process.wait()
-  output_text = "".join(output_lines)
+  output_text = "".join(raw_output)
 
   if returncode not in (0, 1, 6):
     error_msg = output_text.strip() if output_text else f"exit code {returncode}"
