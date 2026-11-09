@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -165,6 +166,19 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
     source_dir.name,
   ]
 
+  entries, total_bytes = _collect_entries(source_dir)
+  file_sizes = {}
+  for path, arcname in entries:
+    try:
+      st = path.lstat()
+    except OSError:
+      continue
+    if stat.S_ISREG(st.st_mode):
+      file_sizes[arcname] = st.st_size
+
+  reporter = ProgressReporter(logger, "Archiving", total_bytes)
+  processed = 0
+
   process = subprocess.Popen(
     command,
     stdout=subprocess.PIPE,
@@ -177,8 +191,20 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
   if process.stdout is not None:
     for line in process.stdout:
       output_lines.append(line)
-      if logger:
-        logger.info(line.rstrip("\n"))
+
+      cleaned = line.replace("\b", "").strip()
+      if not cleaned.startswith("Adding"):
+        continue
+
+      added_name = cleaned[len("Adding"):].strip()
+      if added_name.endswith("OK"):
+        added_name = added_name[:-2].strip()
+      added_name = re.sub(r"\s+\d+%\s*$", "", added_name).strip()
+
+      size = file_sizes.get(added_name)
+      if size is not None:
+        processed += size
+        reporter.update(processed)
 
   returncode = process.wait()
   output_text = "".join(output_lines)
@@ -193,6 +219,8 @@ def create_encrypted_rar(source_dir: Path, archive_path: Path, password: str, lo
   if not archive_path.exists() or archive_path.stat().st_size == 0:
     error_msg = output_text.strip() if output_text else f"exit code {returncode}"
     raise RuntimeError(f"RAR compression failed to produce archive: {error_msg}")
+
+  reporter.finish()
 
   return archive_path.stat().st_size if archive_path.exists() else 0
 
