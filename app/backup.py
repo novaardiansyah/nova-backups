@@ -13,6 +13,7 @@ from .gdrive import (
     upload_file_to_gdrive,
 )
 from .logger import setup_logger
+from .pending_upload import queue_failed_upload, retry_pending_uploads
 from .utils import BackupLock, calculate_checksum, cleanup_empty_directories, format_duration, format_size
 
 
@@ -355,6 +356,10 @@ def run_single_backup(
     elif isinstance(include_raw, list):
         includes = [str(x).strip() for x in include_raw if str(x).strip()]
 
+    failed_upload = False
+    upload_error = None
+    checksum = None
+
     try:
         if snapshot_dir.exists():
             shutil.rmtree(snapshot_dir, ignore_errors=True)
@@ -459,8 +464,10 @@ def run_single_backup(
                         shutil.rmtree(snapshot_dir, ignore_errors=True)
                     cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
                     logger.info("Local temporary files cleaned up.")
-            except Exception:
+            except Exception as upload_err:
                 logger.error("Google Drive upload failed for '%s'", archive_filename)
+                failed_upload = True
+                upload_error = str(upload_err)
                 raise
         elif not keep_local:
             archive_file.unlink(missing_ok=True)
@@ -517,10 +524,11 @@ def run_single_backup(
         logger.error("%sBackup failed: %s after %s - %s", prefix, name, duration_str, err)
 
         shutil.rmtree(snapshot_dir, ignore_errors=True)
-        if archive_file.exists():
+        if not failed_upload and archive_file.exists():
             archive_file.unlink(missing_ok=True)
         cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
 
+        report_id = None
         if schedule_id is not None:
             report_payload = {
                 "schedule_id": schedule_id,
@@ -541,9 +549,50 @@ def run_single_backup(
             if server_id is not None:
                 report_payload["server_id"] = server_id
             try:
-                send_backup_report(report_payload, logger=logger)
+                report_result = send_backup_report(report_payload, logger=logger)
             except Exception as report_err:
                 logger.warning("Failed to send backup failure report to API: %s", report_err)
+            else:
+                if isinstance(report_result, dict):
+                    report_data = report_result.get("data")
+                    if isinstance(report_data, dict):
+                        report_id = report_data.get("id")
+
+        if failed_upload:
+            upload_completed_at = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+            upload_duration = max(0, int(time.time() - start_time))
+            upload_payload = {
+                "schedule_id": schedule_id,
+                "file_name": archive_filename,
+                "file_path": local_file_path,
+                "cloud_file_path": cloud_file_path,
+                "file_size": archive_file.stat().st_size,
+                "checksum": checksum,
+                "type": backup_type,
+                "started_at": started_at,
+                "completed_at": upload_completed_at,
+                "duration": upload_duration,
+                "status": "success",
+                "message": None,
+            }
+            if storage_id is not None:
+                upload_payload["storage_id"] = storage_id
+            if server_id is not None:
+                upload_payload["server_id"] = server_id
+            try:
+                queue_failed_upload(
+                    archive_file,
+                    upload_payload,
+                    cloud_folder=raw_cloud_dest or "/backups",
+                    keys=keys,
+                    error=upload_error,
+                    report_id=report_id,
+                    keep_local=keep_local,
+                    logger=logger,
+                )
+            except Exception as queue_err:
+                logger.error("Failed to persist pending upload: %s", queue_err)
+            cleanup_empty_directories(destination_dir, stop_at=resolve_destination_path(""))
 
         return False
 
@@ -570,6 +619,11 @@ def run_backup(config=None, logger=None):
             encrypt_type = f".{encrypt_type}"
         if encrypt_type not in (".zip", ".rar"):
             raise ValueError(f"Unsupported ENCRYPT_TYPE '{encrypt_type}'. Must be '.zip' or '.rar'")
+
+        try:
+            retry_pending_uploads(logger=logger)
+        except Exception as retry_err:
+            logger.error("Pending upload retry failed: %s", retry_err)
 
         schedules = fetch_backup_schedules(logger=logger)
         if not schedules:

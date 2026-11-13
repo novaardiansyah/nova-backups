@@ -28,6 +28,7 @@ config.yaml
 
 # Runtime state
 pending_api.json
+pending_uploads.json
 
 # Backup data
 Backups/

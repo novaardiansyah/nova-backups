@@ -288,6 +288,60 @@ def send_backup_report(
         return None
 
 
+def delete_backup_report(
+    report_id: int | str,
+    api_url: str | None = None,
+    logger=None,
+    queue_on_failure: bool = True,
+) -> bool:
+    base_url = (api_url or get_env_var("API_URL") or "").rstrip("/")
+    if not base_url:
+        if logger:
+            logger.warning("API_URL is not set. Skipping backup report deletion.")
+        return False
+
+    backup_url = f"{base_url}/backups/{report_id}"
+    pending_payload = {"report_id": report_id}
+
+    try:
+        token = get_valid_token(logger=logger)
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+
+        resp = requests.delete(backup_url, headers=headers, timeout=120)
+
+        if resp.status_code == 401:
+            if logger:
+                logger.warning("Session expired. Refreshing token and retrying...")
+            token = get_valid_token(force_refresh=True, logger=logger)
+            headers["Authorization"] = f"Bearer {token}"
+            resp = requests.delete(backup_url, headers=headers, timeout=120)
+
+        if resp.status_code not in (200, 204, 404):
+            if logger:
+                logger.warning(
+                    "Failed to delete backup report from API (%d): %s",
+                    resp.status_code,
+                    resp.text,
+                )
+            if queue_on_failure:
+                queue_pending_api_event("backup_delete", pending_payload, logger=logger)
+            return False
+
+        if logger:
+            logger.info("Failed backup report deleted from API.")
+        return True
+    except Exception as err:
+        if logger:
+            logger.warning("Error deleting backup report from API: %s", err)
+        if queue_on_failure:
+            queue_pending_api_event("backup_delete", pending_payload, logger=logger)
+        return False
+
+
 def mark_backup_schedule_started(
     schedule_id: int | str,
     api_url: str | None = None,

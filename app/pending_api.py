@@ -59,7 +59,11 @@ def retry_pending_api_events(logger=None) -> None:
   if logger:
     logger.info("Retrying %d pending API event(s)...", len(events))
 
-  from .api import mark_backup_schedule_started, send_backup_report
+  from .api import (
+    delete_backup_report,
+    mark_backup_schedule_started,
+    send_backup_report,
+  )
 
   remaining = []
   for event in events:
@@ -75,6 +79,10 @@ def retry_pending_api_events(logger=None) -> None:
       elif event_type == "backup_report" and isinstance(payload, dict):
         result = send_backup_report(payload, logger=logger)
         success = result is not None
+      elif event_type == "backup_delete" and isinstance(payload, dict):
+        success = delete_backup_report(
+          payload.get("report_id"), logger=logger, queue_on_failure=False
+        )
       else:
         success = True
     except Exception as retry_err:
